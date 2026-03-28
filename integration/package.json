@@ -1,0 +1,26 @@
+{
+  "name": "eip-8182-integration",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "proof:ffi": "tsx src/generate_eip712_proof.ts",
+    "e2e:deposit": "tsx src/e2e_deposit.ts",
+    "e2e:contracts": "cd ../contracts && forge test --match-path 'test/*E2E.t.sol'",
+    "test": "npm run e2e:contracts"
+  },
+  "dependencies": {
+    "@aztec/bb.js": "4.0.0-nightly.20260120",
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^1.8.0",
+    "@noble/post-quantum": "^0.5.4",
+    "@noble/secp256k1": "^2.3.0",
+    "@noir-lang/noir_js": "1.0.0-beta.19",
+    "circomlibjs": "^0.1.7",
+    "viem": "^2.45.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

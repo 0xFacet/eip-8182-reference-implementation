@@ -1,0 +1,10 @@
+[package]
+name = "eip712"
+type = "bin"
+authors = [""]
+compiler_version = ">=1.0.0"
+
+[dependencies]
+inner = { path = "../common" }
+privacy_pool_common = { path = "../../common" }
+keccak256 = { path = "../../vendor/keccak256" }

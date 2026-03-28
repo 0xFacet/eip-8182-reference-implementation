@@ -1,0 +1,9 @@
+[package]
+name = "outer"
+type = "bin"
+authors = [""]
+compiler_version = ">=1.0.0"
+
+[dependencies]
+privacy_pool_common = { path = "../common" }
+bb_proof_verification = { path = "../vendor/bb_proof_verification" }

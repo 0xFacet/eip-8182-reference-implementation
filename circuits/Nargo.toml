@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "common",
+    "inner/common",
+    "inner/eip712",
+    "inner/multisig_2of3",
+    "outer",
+]
+default-member = "outer"

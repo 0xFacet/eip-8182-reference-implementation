@@ -1,0 +1,29 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc = "0.8.28"
+optimizer = true
+optimizer_runs = 200
+evm_version = "cancun"
+ffi = true
+extra_output = ["storageLayout"]
+
+fs_permissions = [
+    { access = "read", path = "out/" },
+    { access = "read", path = "test/" },
+    { access = "read-write", path = "script-output/" },
+]
+
+libraries = [
+    "lib/poseidon-solidity/contracts/PoseidonT3.sol:PoseidonT3:0x3333333C0A88F9BE4fd23ed0536F9B6c427e3B93",
+]
+
+[profile.deploy]
+libraries = []
+
+remappings = [
+    "forge-std/=lib/forge-std/src/",
+    "poseidon-solidity/=lib/poseidon-solidity/contracts/",
+    "@openzeppelin/=lib/openzeppelin-contracts/",
+]

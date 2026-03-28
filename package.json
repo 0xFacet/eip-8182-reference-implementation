@@ -1,0 +1,42 @@
+{
+  "name": "eip-8182-reference-implementation",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "check:domains": "node scripts/generate-domain-constants.mjs --check",
+    "check:eip712": "tsx scripts/check-eip712.ts",
+    "sync:domains": "node scripts/generate-domain-constants.mjs",
+    "contracts:build": "cd contracts && forge build",
+    "contracts:verifier:refresh": "node scripts/sync-honk-verifier.mjs",
+    "contracts:verifier:check": "node scripts/sync-honk-verifier.mjs --check",
+    "bench:eip712-proofs": "node scripts/benchmark-eip712-proofs.mjs",
+    "test": "npm run test:slow",
+    "test:circuits": "cd circuits && env HOME=/tmp/codex/eip8182-tool-home NARGO_HOME=/tmp/codex/eip8182-tool-home/.nargo nargo test --workspace",
+    "test:unit": "npm run check:domains && npm run check:eip712 && node scripts/run-contract-tests.mjs --match-contract 'ShieldedPoolTest|InstallSystemContractsScriptTest'",
+    "test:slow": "npm run test:unit && node scripts/run-contract-tests.mjs --match-contract VerifierPrecompileIntegrationTest -vv && node scripts/run-contract-tests.mjs --match-path test/SmokeE2E.t.sol",
+    "test:e2e:fullflow": "node scripts/run-contract-tests.mjs --match-path test/FullFlowE2E.t.sol",
+    "test:all": "npm run test:slow && npm run test:e2e:fullflow",
+    "prover:start": "tsx prover/src/index.ts",
+    "prover:dev": "tsx watch prover/src/index.ts"
+  },
+  "dependencies": {
+    "@aztec/bb.js": "4.0.0-nightly.20260120",
+    "@fastify/cors": "^10.0.0",
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^1.8.0",
+    "@noble/post-quantum": "^0.5.4",
+    "@noble/secp256k1": "^2.3.0",
+    "@noir-lang/noir_js": "1.0.0-beta.19",
+    "circomlibjs": "^0.1.7",
+    "ethers": "^5.7.2",
+    "fastify": "^5.0.0",
+    "piscina": "^5.1.0",
+    "viem": "^2.45.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.0"
+  }
+}

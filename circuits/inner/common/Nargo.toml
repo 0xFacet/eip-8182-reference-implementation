@@ -1,0 +1,9 @@
+[package]
+name = "inner"
+type = "lib"
+authors = [""]
+compiler_version = ">=1.0.0"
+
+[dependencies]
+privacy_pool_common = { path = "../../common" }
+keccak256 = { path = "../../vendor/keccak256" }
