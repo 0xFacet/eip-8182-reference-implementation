@@ -13,7 +13,7 @@ use privacy_pool_common::constants::{
     TRANSFER_OP,
     WITHDRAWAL_OP,
 };
-use privacy_pool_common::digest::intent_digest as common_intent_digest;
+use privacy_pool_common::digest::transaction_intent_digest as common_transaction_intent_digest;
 use privacy_pool_common::hash_utils::p_hash2;
 use privacy_pool_common::range::{
     assert_address,
@@ -66,7 +66,7 @@ pub struct SigningHash {
 
 pub struct InnerOutputs {
     pub auth_data_commitment: Field,
-    pub intent_digest: Field,
+    pub transaction_intent_digest: Field,
 }
 
 pub struct ExecutionConstraints {
@@ -177,7 +177,7 @@ impl ValidatedIntent {
     pub fn finalize(self, authorization: Authorization) -> InnerOutputs {
         InnerOutputs {
             auth_data_commitment: authorization.auth_data_commitment,
-            intent_digest: self.intent_digest(),
+            transaction_intent_digest: self.transaction_intent_digest(),
         }
     }
 
@@ -249,10 +249,10 @@ impl ValidatedIntent {
         keccak256(signing_preimage, 66)
     }
 
-    pub fn intent_digest(self) -> Field {
+    pub fn transaction_intent_digest(self) -> Field {
         let intent = self;
         let execution_constraints = intent.execution_constraints;
-        common_intent_digest(
+        common_transaction_intent_digest(
             intent.policy_version,
             intent.authorizing_address,
             intent.operation_kind,
@@ -387,9 +387,9 @@ fn sample_validated_intent(origin_mode: Field) -> ValidatedIntent {
 }
 
 #[test]
-fn test_intent_digest_changes_with_origin_mode() {
-    let digest0 = sample_validated_intent(0).intent_digest();
-    let digest1 = sample_validated_intent(1).intent_digest();
+fn test_transaction_intent_digest_changes_with_origin_mode() {
+    let digest0 = sample_validated_intent(0).transaction_intent_digest();
+    let digest1 = sample_validated_intent(1).transaction_intent_digest();
     assert(digest0 != digest1);
 }
 
@@ -429,8 +429,8 @@ fn test_eip712_signing_hash_matches_expected_sample() {
 }
 
 #[test]
-fn test_intent_digest_changes_with_execution_constraints() {
-    let digest0 = sample_validated_intent(0).intent_digest();
+fn test_transaction_intent_digest_changes_with_execution_constraints() {
+    let digest0 = sample_validated_intent(0).transaction_intent_digest();
     let digest1 = Intent {
         authorizing_address: 0x7e5f4552091a69125d5dfcb7b8c2659029395bdf,
         policy_version: 1,
@@ -450,6 +450,6 @@ fn test_intent_digest_changes_with_execution_constraints() {
         nonce: 42,
         valid_until_seconds: 3600,
         execution_chain_id: 31337,
-    }.assert_valid().intent_digest();
+    }.assert_valid().transaction_intent_digest();
     assert(digest0 != digest1);
 }

@@ -4,12 +4,17 @@ use crate::merkle::{auth_sparse_root, user_sparse_root};
 use crate::types::{
     AuthPolicyLeaf,
     AuthPolicyWitness,
-    MinimalUserRegistryLeaf,
     UserRegistryWitness,
+    UserRegistryLeaf,
 };
 
-pub fn minimal_user_leaf_hash(address_key: Field, leaf: MinimalUserRegistryLeaf) -> Field {
-    p_hash4([USER_REGISTRY_LEAF_DOMAIN, address_key, leaf.nullifier_key_hash, leaf.output_secret_hash])
+pub fn user_registry_leaf_hash(address_key: Field, leaf: UserRegistryLeaf) -> Field {
+    p_hash4([
+        USER_REGISTRY_LEAF_DOMAIN,
+        address_key,
+        leaf.owner_nullifier_key_hash,
+        leaf.note_secret_seed_hash,
+    ])
 }
 
 pub fn auth_policy_leaf_hash(leaf: AuthPolicyLeaf) -> Field {
@@ -21,19 +26,25 @@ pub fn auth_policy_key(authorizing_address: Field, inner_vk_hash: Field) -> Fiel
 }
 
 #[test]
-fn test_minimal_user_leaf_hash_deterministic() {
-    let leaf = MinimalUserRegistryLeaf { nullifier_key_hash: 0xaaaa, output_secret_hash: 0xbbbb };
-    let h1 = minimal_user_leaf_hash(0x1234, leaf);
-    let h2 = minimal_user_leaf_hash(0x1234, leaf);
+fn test_user_registry_leaf_hash_deterministic() {
+    let leaf = UserRegistryLeaf {
+        owner_nullifier_key_hash: 0xaaaa,
+        note_secret_seed_hash: 0xbbbb,
+    };
+    let h1 = user_registry_leaf_hash(0x1234, leaf);
+    let h2 = user_registry_leaf_hash(0x1234, leaf);
     assert(h1 == h2);
     assert(h1 != 0);
 }
 
 #[test]
 fn test_different_address_different_leaf() {
-    let leaf = MinimalUserRegistryLeaf { nullifier_key_hash: 0xaaaa, output_secret_hash: 0xbbbb };
-    let h1 = minimal_user_leaf_hash(0x1234, leaf);
-    let h2 = minimal_user_leaf_hash(0x5678, leaf);
+    let leaf = UserRegistryLeaf {
+        owner_nullifier_key_hash: 0xaaaa,
+        note_secret_seed_hash: 0xbbbb,
+    };
+    let h1 = user_registry_leaf_hash(0x1234, leaf);
+    let h2 = user_registry_leaf_hash(0x5678, leaf);
     assert(h1 != h2);
 }
 
@@ -54,8 +65,12 @@ fn test_auth_policy_leaf_hash_deterministic() {
     assert(h1 != 0);
 }
 
-pub fn minimal_user_membership_root(address_key: Field, leaf: MinimalUserRegistryLeaf, witness: UserRegistryWitness) -> Field {
-    user_sparse_root(address_key, minimal_user_leaf_hash(address_key, leaf), witness.siblings)
+pub fn user_registry_membership_root(
+    address_key: Field,
+    leaf: UserRegistryLeaf,
+    witness: UserRegistryWitness,
+) -> Field {
+    user_sparse_root(address_key, user_registry_leaf_hash(address_key, leaf), witness.siblings)
 }
 
 pub fn auth_membership_root(authorizing_address: Field, inner_vk_hash: Field, leaf: AuthPolicyLeaf, witness: AuthPolicyWitness) -> Field {

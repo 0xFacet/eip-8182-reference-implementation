@@ -69,18 +69,18 @@ contract VerifierPrecompileIntegrationTest is Test, InstallSystemTestBase {
     function _fixturePublicInputs() private view returns (ShieldedPool.PublicInputs memory publicInputs) {
         assertEq(fixturePublicInputs.length, 19);
 
-        publicInputs.merkleRoot = uint256(fixturePublicInputs[0]);
+        publicInputs.noteCommitmentRoot = uint256(fixturePublicInputs[0]);
         publicInputs.nullifier0 = uint256(fixturePublicInputs[1]);
         publicInputs.nullifier1 = uint256(fixturePublicInputs[2]);
-        publicInputs.commitment0 = uint256(fixturePublicInputs[3]);
-        publicInputs.commitment1 = uint256(fixturePublicInputs[4]);
-        publicInputs.commitment2 = uint256(fixturePublicInputs[5]);
+        publicInputs.noteCommitment0 = uint256(fixturePublicInputs[3]);
+        publicInputs.noteCommitment1 = uint256(fixturePublicInputs[4]);
+        publicInputs.noteCommitment2 = uint256(fixturePublicInputs[5]);
         publicInputs.publicAmountIn = uint256(fixturePublicInputs[6]);
         publicInputs.publicAmountOut = uint256(fixturePublicInputs[7]);
         publicInputs.publicRecipientAddress = uint256(fixturePublicInputs[8]);
         publicInputs.publicTokenAddress = uint256(fixturePublicInputs[9]);
         publicInputs.depositorAddress = uint256(fixturePublicInputs[10]);
-        publicInputs.intentNullifier = uint256(fixturePublicInputs[11]);
+        publicInputs.transactionReplayId = uint256(fixturePublicInputs[11]);
         publicInputs.registryRoot = uint256(fixturePublicInputs[12]);
         publicInputs.validUntilSeconds = uint256(fixturePublicInputs[13]);
         publicInputs.executionChainId = uint256(fixturePublicInputs[14]);

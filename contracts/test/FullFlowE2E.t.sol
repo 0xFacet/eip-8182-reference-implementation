@@ -21,7 +21,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         ProofFixture memory depositFixture = _generateDepositFixture(
             aliceUser,
             currentPolicyVersion,
-            _currentCommitmentRoot(),
+            _currentNoteCommitmentRoot(),
             _currentUserRegistryRoot(),
             _currentAuthPolicyRoot()
         );
@@ -34,16 +34,16 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             aliceUser,
             TransferRequest({
                 policyVersion: currentPolicyVersion,
-                commitRoot: _currentCommitmentRoot(),
+                commitRoot: _currentNoteCommitmentRoot(),
                 userRegRoot: _currentUserRegistryRoot(),
                 authPolicyRoot: _currentAuthPolicyRoot(),
                 inputLeafIndex: 0,
                 inputAmount: depositFixture.note0Amount,
-                inputRandomness: depositFixture.note0Randomness,
+                inputNoteSecret: depositFixture.note0NoteSecret,
                 inputOriginTag: depositFixture.note0OriginTag,
                 recipient: bob,
-                recipientNkHash: bobUser.nkHash,
-                recipientOsHash: bobUser.osHash,
+                recipientOwnerNullifierKeyHash: bobUser.ownerNullifierKeyHash,
+                recipientNoteSecretSeedHash: bobUser.noteSecretSeedHash,
                 transferAmount: TRANSFER_AMOUNT,
                 changeAmount: depositFixture.note0Amount - TRANSFER_AMOUNT,
                 inputSiblings: _commitmentSiblings(_depositLeaves(depositFixture), 0),
@@ -70,16 +70,16 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         uint256[REGISTRY_TREE_DEPTH] memory authSiblings = _authPolicySiblings(ALICE, multisigPolicy.innerVkHash);
         TransferRequest memory request = TransferRequest({
             policyVersion: multisigPolicyVersion,
-            commitRoot: _currentCommitmentRoot(),
+            commitRoot: _currentNoteCommitmentRoot(),
             userRegRoot: _currentUserRegistryRoot(),
             authPolicyRoot: _currentAuthPolicyRoot(),
             inputLeafIndex: 0,
             inputAmount: depositFixture.note0Amount,
-            inputRandomness: depositFixture.note0Randomness,
+            inputNoteSecret: depositFixture.note0NoteSecret,
             inputOriginTag: depositFixture.note0OriginTag,
             recipient: bob,
-            recipientNkHash: bobUser.nkHash,
-            recipientOsHash: bobUser.osHash,
+            recipientOwnerNullifierKeyHash: bobUser.ownerNullifierKeyHash,
+            recipientNoteSecretSeedHash: bobUser.noteSecretSeedHash,
             transferAmount: TRANSFER_AMOUNT,
             changeAmount: depositFixture.note0Amount - TRANSFER_AMOUNT,
             inputSiblings: _commitmentSiblings(_depositLeaves(depositFixture), 0),
@@ -106,7 +106,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         ProofFixture memory depositFixture = _generateMultisigDepositFixture(
             aliceUser,
             multisigPolicyVersion,
-            _currentCommitmentRoot(),
+            _currentNoteCommitmentRoot(),
             _currentUserRegistryRoot(),
             _currentAuthPolicyRoot(),
             _authPolicySiblings(ALICE, multisigPolicy.innerVkHash)
@@ -123,7 +123,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         ProofFixture memory depositFixture = _generateDepositFixture(
             aliceUser,
             currentPolicyVersion,
-            _currentCommitmentRoot(),
+            _currentNoteCommitmentRoot(),
             _currentUserRegistryRoot(),
             _currentAuthPolicyRoot()
         );
@@ -139,7 +139,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         string memory params = _buildDepositParams(
             aliceUser,
             currentPolicyVersion,
-            _currentCommitmentRoot(),
+            _currentNoteCommitmentRoot(),
             _currentUserRegistryRoot(),
             _currentAuthPolicyRoot()
         );
@@ -165,7 +165,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         ProofFixture memory depositFixture = _generateMultisigDepositFixture(
             aliceUser,
             multisigPolicyVersion,
-            _currentCommitmentRoot(),
+            _currentNoteCommitmentRoot(),
             _currentUserRegistryRoot(),
             _currentAuthPolicyRoot(),
             authSiblings
@@ -178,12 +178,12 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             aliceUser,
             WithdrawRequest({
                 policyVersion: multisigPolicyVersion,
-                commitRoot: _currentCommitmentRoot(),
+                commitRoot: _currentNoteCommitmentRoot(),
                 userRegRoot: _currentUserRegistryRoot(),
                 authPolicyRoot: _currentAuthPolicyRoot(),
                 inputLeafIndex: 0,
                 inputAmount: depositFixture.note0Amount,
-                inputRandomness: depositFixture.note0Randomness,
+                inputNoteSecret: depositFixture.note0NoteSecret,
                 inputOriginTag: depositFixture.note0OriginTag,
                 publicRecipient: publicRecipient,
                 withdrawAmount: WITHDRAW_AMOUNT,
@@ -208,7 +208,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         ProofFixture memory depositFixture = _generateDepositFixture(
             aliceUser,
             currentPolicyVersion,
-            _currentCommitmentRoot(),
+            _currentNoteCommitmentRoot(),
             _currentUserRegistryRoot(),
             _currentAuthPolicyRoot()
         );
@@ -220,12 +220,12 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             aliceUser,
             WithdrawRequest({
                 policyVersion: currentPolicyVersion,
-                commitRoot: _currentCommitmentRoot(),
+                commitRoot: _currentNoteCommitmentRoot(),
                 userRegRoot: _currentUserRegistryRoot(),
                 authPolicyRoot: _currentAuthPolicyRoot(),
                 inputLeafIndex: 0,
                 inputAmount: depositFixture.note0Amount,
-                inputRandomness: depositFixture.note0Randomness,
+                inputNoteSecret: depositFixture.note0NoteSecret,
                 inputOriginTag: depositFixture.note0OriginTag,
                 publicRecipient: publicRecipient,
                 withdrawAmount: WITHDRAW_AMOUNT,
@@ -252,7 +252,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             _buildDepositParamsForRecipient(
                 aliceUser,
                 alicePolicyVersion,
-                _currentCommitmentRoot(),
+                _currentNoteCommitmentRoot(),
                 _currentUserRegistryRoot(),
                 _currentAuthPolicyRoot(),
                 bob,
@@ -270,12 +270,12 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             bobSecrets,
             WithdrawRequest({
                 policyVersion: bobPolicyVersion,
-                commitRoot: _currentCommitmentRoot(),
+                commitRoot: _currentNoteCommitmentRoot(),
                 userRegRoot: _currentUserRegistryRoot(),
                 authPolicyRoot: _currentAuthPolicyRoot(),
                 inputLeafIndex: 0,
                 inputAmount: depositFixture.note0Amount,
-                inputRandomness: depositFixture.note0Randomness,
+                inputNoteSecret: depositFixture.note0NoteSecret,
                 inputOriginTag: depositFixture.note0OriginTag,
                 publicRecipient: publicRecipient,
                 withdrawAmount: WITHDRAW_AMOUNT,
@@ -298,7 +298,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         string memory params = _buildDepositParamsWithFee(
             aliceUser,
             alicePolicyVersion,
-            _currentCommitmentRoot(),
+            _currentNoteCommitmentRoot(),
             _currentUserRegistryRoot(),
             _currentAuthPolicyRoot(),
             ALICE,
@@ -323,7 +323,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             _buildDepositParamsWithFee(
                 aliceUser,
                 alicePolicyVersion,
-                _currentCommitmentRoot(),
+                _currentNoteCommitmentRoot(),
                 _currentUserRegistryRoot(),
                 _currentAuthPolicyRoot(),
                 feeCollector,
@@ -354,7 +354,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             BOB_DS,
             2,
             depositFixture.noteData2,
-            depositFixture.pubInputs.commitment2
+            depositFixture.pubInputs.noteCommitment2
         );
         assertTrue(feeNote.found, "fee note not recovered");
         assertEq(feeNote.amount, feeAmount, "fee amount mismatch");
@@ -369,12 +369,12 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             feeCollectorSecrets,
             WithdrawRequest({
                 policyVersion: feeCollectorPolicyVersion,
-                commitRoot: _currentCommitmentRoot(),
+                commitRoot: _currentNoteCommitmentRoot(),
                 userRegRoot: _currentUserRegistryRoot(),
                 authPolicyRoot: _currentAuthPolicyRoot(),
                 inputLeafIndex: 2,
                 inputAmount: feeNote.amount,
-                inputRandomness: feeNote.randomness,
+                inputNoteSecret: feeNote.noteSecret,
                 inputOriginTag: feeNote.originTag,
                 publicRecipient: publicRecipient,
                 withdrawAmount: feeAmount,
@@ -445,18 +445,18 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
     function test_FullFlow_RecipientRecoversTransferNoteAndWithdraws() public {
         RecoveredTransferContext memory ctx = _prepareRecoveredTransferContext();
         SyncedTransactFixture[] memory history = new SyncedTransactFixture[](2);
-        uint256 originalTransferCommitment0 = ctx.transferFixture.pubInputs.commitment0;
+        uint256 originalTransferCommitment0 = ctx.transferFixture.pubInputs.noteCommitment0;
         ProofFixture memory corruptedTransferFixture = ctx.transferFixture;
-        corruptedTransferFixture.pubInputs.commitment0 = originalTransferCommitment0 + 1;
+        corruptedTransferFixture.pubInputs.noteCommitment0 = originalTransferCommitment0 + 1;
         history[0] = SyncedTransactFixture({leafIndex0: 0, fixture: ctx.depositFixture});
         history[1] = SyncedTransactFixture({leafIndex0: ctx.transferLeafIndex0, fixture: corruptedTransferFixture});
 
         RecoveredNote memory missingNote = _recoverFirstUnspentNoteFromHistory(
-            ctx.bob, ctx.bobSecrets.nullifierKey, ctx.bobSecrets.deliverySecret, history
+            ctx.bob, ctx.bobSecrets.ownerNullifierKey, ctx.bobSecrets.deliverySecret, history
         );
         assertFalse(missingNote.found, "corrupted commitment should not recover");
 
-        ctx.transferFixture.pubInputs.commitment0 = originalTransferCommitment0;
+        ctx.transferFixture.pubInputs.noteCommitment0 = originalTransferCommitment0;
         history[1] = SyncedTransactFixture({leafIndex0: ctx.transferLeafIndex0, fixture: ctx.transferFixture});
 
         RecoveredNote memory aliceChangeNote = _recoverFirstUnspentNoteFromHistory(ALICE, NK, DS, history);
@@ -467,13 +467,13 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         );
 
         RecoveredNote memory bobNote = _recoverFirstUnspentNoteFromHistory(
-            ctx.bob, ctx.bobSecrets.nullifierKey, ctx.bobSecrets.deliverySecret, history
+            ctx.bob, ctx.bobSecrets.ownerNullifierKey, ctx.bobSecrets.deliverySecret, history
         );
         assertTrue(bobNote.found, "recipient note not recovered");
         assertEq(bobNote.leafIndex, ctx.transferLeafIndex0, "leaf index mismatch");
         assertEq(bobNote.amount, TRANSFER_AMOUNT, "recovered amount mismatch");
         assertEq(bobNote.ownerAddress, uint256(uint160(ctx.bob)), "recovered owner mismatch");
-        assertEq(bobNote.nullifierKeyHash, ctx.bobUser.nkHash, "recovered nk hash mismatch");
+        assertEq(bobNote.ownerNullifierKeyHash, ctx.bobUser.ownerNullifierKeyHash, "recovered nk hash mismatch");
 
         address publicRecipient = makeAddr("recoveredWithdrawRecipient");
         uint256 balanceBefore = publicRecipient.balance;
@@ -494,7 +494,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         });
 
         RecoveredNote memory bobChangeNote = _recoverFirstUnspentNoteFromHistory(
-            ctx.bob, ctx.bobSecrets.nullifierKey, ctx.bobSecrets.deliverySecret, postWithdrawHistory
+            ctx.bob, ctx.bobSecrets.ownerNullifierKey, ctx.bobSecrets.deliverySecret, postWithdrawHistory
         );
         assertTrue(bobChangeNote.found, "recipient change note not recovered");
         assertEq(bobChangeNote.leafIndex, ctx.transferLeafIndex0 + 3, "recipient change leaf index mismatch");
@@ -522,16 +522,16 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             aliceUser,
             TransferRequest({
                 policyVersion: currentPolicyVersion,
-                commitRoot: _currentCommitmentRoot(),
+                commitRoot: _currentNoteCommitmentRoot(),
                 userRegRoot: _currentUserRegistryRoot(),
                 authPolicyRoot: _currentAuthPolicyRoot(),
                 inputLeafIndex: 0,
                 inputAmount: depositFixture.note0Amount,
-                inputRandomness: depositFixture.note0Randomness,
+                inputNoteSecret: depositFixture.note0NoteSecret,
                 inputOriginTag: depositFixture.note0OriginTag,
                 recipient: bob,
-                recipientNkHash: bobUser.nkHash,
-                recipientOsHash: bobUser.osHash,
+                recipientOwnerNullifierKeyHash: bobUser.ownerNullifierKeyHash,
+                recipientNoteSecretSeedHash: bobUser.noteSecretSeedHash,
                 transferAmount: TRANSFER_AMOUNT,
                 changeAmount: depositFixture.note0Amount - TRANSFER_AMOUNT,
                 inputSiblings: _commitmentSiblings(_depositLeaves(depositFixture), 0),
@@ -544,7 +544,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         _executeTransferFixture(transferFixture);
 
         RecoveredNote memory staleKeyNote = _recoverSingleChainNote(
-            bob, BOB_NK, BOB_DS, transferLeafIndex0, transferFixture.noteData0, transferFixture.pubInputs.commitment0
+            bob, BOB_NK, BOB_DS, transferLeafIndex0, transferFixture.noteData0, transferFixture.pubInputs.noteCommitment0
         );
         assertFalse(staleKeyNote.found, "stale delivery key unexpectedly recovered note");
 
@@ -554,7 +554,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             rotatedDeliverySecret,
             transferLeafIndex0,
             transferFixture.noteData0,
-            transferFixture.pubInputs.commitment0
+            transferFixture.pubInputs.noteCommitment0
         );
         assertTrue(rotatedKeyNote.found, "rotated delivery key did not recover note");
         assertEq(rotatedKeyNote.amount, TRANSFER_AMOUNT, "rotated delivery key recovered wrong note");
@@ -604,7 +604,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         string memory params = _buildDepositParams(
             aliceUser,
             currentPolicyVersion,
-            _currentCommitmentRoot(),
+            _currentNoteCommitmentRoot(),
             _currentUserRegistryRoot(),
             _currentAuthPolicyRoot()
         );
@@ -623,16 +623,16 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             aliceUser,
             TransferRequest({
                 policyVersion: currentPolicyVersion,
-                commitRoot: _currentCommitmentRoot(),
+                commitRoot: _currentNoteCommitmentRoot(),
                 userRegRoot: _currentUserRegistryRoot(),
                 authPolicyRoot: _currentAuthPolicyRoot(),
                 inputLeafIndex: 0,
                 inputAmount: depositFixture.note0Amount,
-                inputRandomness: depositFixture.note0Randomness,
+                inputNoteSecret: depositFixture.note0NoteSecret,
                 inputOriginTag: depositFixture.note0OriginTag,
                 recipient: bob,
-                recipientNkHash: bobUser.nkHash,
-                recipientOsHash: bobUser.osHash,
+                recipientOwnerNullifierKeyHash: bobUser.ownerNullifierKeyHash,
+                recipientNoteSecretSeedHash: bobUser.noteSecretSeedHash,
                 transferAmount: TRANSFER_AMOUNT,
                 changeAmount: depositFixture.note0Amount - TRANSFER_AMOUNT,
                 inputSiblings: _commitmentSiblings(_depositLeaves(depositFixture), 0),
@@ -663,7 +663,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         string memory params = _buildDepositParams(
             aliceUser,
             currentPolicyVersion,
-            _currentCommitmentRoot(),
+            _currentNoteCommitmentRoot(),
             _currentUserRegistryRoot(),
             _currentAuthPolicyRoot()
         );
@@ -680,12 +680,12 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             aliceUser,
             WithdrawRequest({
                 policyVersion: currentPolicyVersion,
-                commitRoot: _currentCommitmentRoot(),
+                commitRoot: _currentNoteCommitmentRoot(),
                 userRegRoot: _currentUserRegistryRoot(),
                 authPolicyRoot: _currentAuthPolicyRoot(),
                 inputLeafIndex: 0,
                 inputAmount: depositFixture.note0Amount,
-                inputRandomness: depositFixture.note0Randomness,
+                inputNoteSecret: depositFixture.note0NoteSecret,
                 inputOriginTag: depositFixture.note0OriginTag,
                 publicRecipient: publicRecipient,
                 withdrawAmount: WITHDRAW_AMOUNT,
@@ -712,7 +712,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         ProofFixture memory depositFixture = _generateDepositFixture(
             aliceUser,
             currentPolicyVersion,
-            _currentCommitmentRoot(),
+            _currentNoteCommitmentRoot(),
             _currentUserRegistryRoot(),
             _currentAuthPolicyRoot()
         );
@@ -726,16 +726,16 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             aliceUser,
             TransferRequest({
                 policyVersion: currentPolicyVersion,
-                commitRoot: _currentCommitmentRoot(),
+                commitRoot: _currentNoteCommitmentRoot(),
                 userRegRoot: _currentUserRegistryRoot(),
                 authPolicyRoot: _currentAuthPolicyRoot(),
                 inputLeafIndex: 0,
                 inputAmount: depositFixture.note0Amount,
-                inputRandomness: depositFixture.note0Randomness,
+                inputNoteSecret: depositFixture.note0NoteSecret,
                 inputOriginTag: depositFixture.note0OriginTag,
                 recipient: bob,
-                recipientNkHash: bobUser.nkHash,
-                recipientOsHash: bobUser.osHash,
+                recipientOwnerNullifierKeyHash: bobUser.ownerNullifierKeyHash,
+                recipientNoteSecretSeedHash: bobUser.noteSecretSeedHash,
                 transferAmount: TRANSFER_AMOUNT,
                 changeAmount: depositFixture.note0Amount - TRANSFER_AMOUNT,
                 inputSiblings: _commitmentSiblings(_depositLeaves(depositFixture), 0),
@@ -757,7 +757,7 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         ctx.depositFixture = _generateDepositFixture(
             aliceUser,
             alicePolicyVersion,
-            _currentCommitmentRoot(),
+            _currentNoteCommitmentRoot(),
             _currentUserRegistryRoot(),
             _currentAuthPolicyRoot()
         );
@@ -778,16 +778,16 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
             aliceUser,
             TransferRequest({
                 policyVersion: alicePolicyVersion,
-                commitRoot: _currentCommitmentRoot(),
+                commitRoot: _currentNoteCommitmentRoot(),
                 userRegRoot: _currentUserRegistryRoot(),
                 authPolicyRoot: _currentAuthPolicyRoot(),
                 inputLeafIndex: 0,
                 inputAmount: ctx.depositFixture.note0Amount,
-                inputRandomness: ctx.depositFixture.note0Randomness,
+                inputNoteSecret: ctx.depositFixture.note0NoteSecret,
                 inputOriginTag: ctx.depositFixture.note0OriginTag,
                 recipient: ctx.bob,
-                recipientNkHash: ctx.bobUser.nkHash,
-                recipientOsHash: ctx.bobUser.osHash,
+                recipientOwnerNullifierKeyHash: ctx.bobUser.ownerNullifierKeyHash,
+                recipientNoteSecretSeedHash: ctx.bobUser.noteSecretSeedHash,
                 transferAmount: TRANSFER_AMOUNT,
                 changeAmount: ctx.depositFixture.note0Amount - TRANSFER_AMOUNT,
                 inputSiblings: _commitmentSiblings(_depositLeaves(ctx.depositFixture), 0),
@@ -809,16 +809,16 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
     ) internal view returns (TransferRequest memory request) {
         request = TransferRequest({
             policyVersion: policyVersion,
-            commitRoot: _currentCommitmentRoot(),
+            commitRoot: _currentNoteCommitmentRoot(),
             userRegRoot: _currentUserRegistryRoot(),
             authPolicyRoot: _currentAuthPolicyRoot(),
             inputLeafIndex: 0,
             inputAmount: depositFixture.note0Amount,
-            inputRandomness: depositFixture.note0Randomness,
+            inputNoteSecret: depositFixture.note0NoteSecret,
             inputOriginTag: depositFixture.note0OriginTag,
             recipient: recipient,
-            recipientNkHash: recipientUser.nkHash,
-            recipientOsHash: recipientUser.osHash,
+            recipientOwnerNullifierKeyHash: recipientUser.ownerNullifierKeyHash,
+            recipientNoteSecretSeedHash: recipientUser.noteSecretSeedHash,
             transferAmount: TRANSFER_AMOUNT,
             changeAmount: depositFixture.note0Amount - TRANSFER_AMOUNT,
             inputSiblings: _commitmentSiblings(_depositLeaves(depositFixture), 0),
@@ -834,12 +834,12 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
     ) internal returns (ProofFixture memory withdrawFixture) {
         WithdrawRequest memory request = WithdrawRequest({
             policyVersion: ctx.bobPolicyVersion,
-            commitRoot: _currentCommitmentRoot(),
+            commitRoot: _currentNoteCommitmentRoot(),
             userRegRoot: _currentUserRegistryRoot(),
             authPolicyRoot: _currentAuthPolicyRoot(),
             inputLeafIndex: bobNote.leafIndex,
             inputAmount: bobNote.amount,
-            inputRandomness: bobNote.randomness,
+            inputNoteSecret: bobNote.noteSecret,
             inputOriginTag: bobNote.originTag,
             publicRecipient: publicRecipient,
             withdrawAmount: RECOVERED_WITHDRAW_AMOUNT,
@@ -863,8 +863,8 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
     ) internal returns (string memory params) {
         params = _buildDepositParams(user, policyVersion, commitRoot, userRegRoot, authPolicyRoot);
         vm.serializeAddress("depositParams", "recipientAddress", recipient);
-        vm.serializeUint("depositParams", "recipientNkHash", recipientUser.nkHash);
-        vm.serializeUint("depositParams", "recipientOsHash", recipientUser.osHash);
+        vm.serializeUint("depositParams", "recipientOwnerNullifierKeyHash", recipientUser.ownerNullifierKeyHash);
+        vm.serializeUint("depositParams", "recipientNoteSecretSeedHash", recipientUser.noteSecretSeedHash);
         vm.serializeString("depositParams", "recipientSiblings", _registrySiblingStrings(_userRegistrySiblings(recipient)));
         _serializeRegisteredDeliveryKey("depositParams", "recipientDeliverySchemeId", "recipientDeliveryPubKey", recipient);
         params = vm.serializeString("depositParams", "signingPrivateKey", ALICE_SIGNING_PRIVATE_KEY);
@@ -883,8 +883,8 @@ contract FullFlowE2ETest is ShieldedPoolE2EBase {
         params = _buildDepositParams(user, policyVersion, commitRoot, userRegRoot, authPolicyRoot);
         vm.serializeAddress("depositParams", "feeRecipientAddress", feeRecipient);
         vm.serializeUint("depositParams", "feeAmount", feeAmount);
-        vm.serializeUint("depositParams", "feeNkHash", feeRecipientUser.nkHash);
-        vm.serializeUint("depositParams", "feeOsHash", feeRecipientUser.osHash);
+        vm.serializeUint("depositParams", "feeOwnerNullifierKeyHash", feeRecipientUser.ownerNullifierKeyHash);
+        vm.serializeUint("depositParams", "feeNoteSecretSeedHash", feeRecipientUser.noteSecretSeedHash);
         vm.serializeString("depositParams", "feeSiblings", _registrySiblingStrings(_userRegistrySiblings(feeRecipient)));
         _serializeRegisteredDeliveryKey("depositParams", "feeDeliverySchemeId", "feeDeliveryPubKey", feeRecipient);
         params = vm.serializeString("depositParams", "signingPrivateKey", ALICE_SIGNING_PRIVATE_KEY);

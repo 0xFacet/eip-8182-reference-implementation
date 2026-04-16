@@ -30,16 +30,16 @@ contract SmokeE2ETest is ShieldedPoolE2EBase {
     ) internal view returns (TransferRequest memory request) {
         request = TransferRequest({
             policyVersion: policyVersion,
-            commitRoot: _currentCommitmentRoot(),
+            commitRoot: _currentNoteCommitmentRoot(),
             userRegRoot: _currentUserRegistryRoot(),
             authPolicyRoot: _currentAuthPolicyRoot(),
             inputLeafIndex: 0,
             inputAmount: depositFixture.note0Amount,
-            inputRandomness: depositFixture.note0Randomness,
+            inputNoteSecret: depositFixture.note0NoteSecret,
             inputOriginTag: depositFixture.note0OriginTag,
             recipient: recipient,
-            recipientNkHash: recipientUser.nkHash,
-            recipientOsHash: recipientUser.osHash,
+            recipientOwnerNullifierKeyHash: recipientUser.ownerNullifierKeyHash,
+            recipientNoteSecretSeedHash: recipientUser.noteSecretSeedHash,
             transferAmount: TRANSFER_AMOUNT,
             changeAmount: depositFixture.note0Amount - TRANSFER_AMOUNT,
             inputSiblings: _commitmentSiblings(_depositLeaves(depositFixture), 0),
@@ -56,7 +56,7 @@ contract SmokeE2ETest is ShieldedPoolE2EBase {
         ProofFixture memory transferFixture
     ) internal {
         RecoveredNote memory bobNote = _recoverSingleChainNote(
-            bob, BOB_NK, BOB_DS, bobLeafIndex, transferFixture.noteData0, transferFixture.pubInputs.commitment0
+            bob, BOB_NK, BOB_DS, bobLeafIndex, transferFixture.noteData0, transferFixture.pubInputs.noteCommitment0
         );
         assertTrue(bobNote.found, "recipient note not recovered");
         assertEq(bobNote.amount, TRANSFER_AMOUNT, "recovered amount mismatch");
@@ -68,12 +68,12 @@ contract SmokeE2ETest is ShieldedPoolE2EBase {
         uint256[] memory combinedLeaves = _combinedLeaves(depositFixture, transferFixture);
         WithdrawRequest memory request;
         request.policyVersion = bobPolicyVersion;
-        request.commitRoot = _currentCommitmentRoot();
+        request.commitRoot = _currentNoteCommitmentRoot();
         request.userRegRoot = _currentUserRegistryRoot();
         request.authPolicyRoot = _currentAuthPolicyRoot();
         request.inputLeafIndex = bobLeafIndex;
         request.inputAmount = bobNote.amount;
-        request.inputRandomness = bobNote.randomness;
+        request.inputNoteSecret = bobNote.noteSecret;
         request.inputOriginTag = bobNote.originTag;
         request.publicRecipient = publicRecipient;
         request.withdrawAmount = RECOVERED_WITHDRAW_AMOUNT;

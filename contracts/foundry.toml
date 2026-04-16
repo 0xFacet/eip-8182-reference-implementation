@@ -12,6 +12,7 @@ extra_output = ["storageLayout"]
 fs_permissions = [
     { access = "read", path = "out/" },
     { access = "read", path = "test/" },
+    { access = "read", path = "../assets/" },
     { access = "read-write", path = "script-output/" },
 ]
 

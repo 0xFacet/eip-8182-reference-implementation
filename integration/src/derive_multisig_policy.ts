@@ -2,7 +2,6 @@ import * as secp from "@noble/secp256k1";
 import {
   canonicalizeMultisigSigners,
   computeShieldedPoolIntentSigningHash,
-  computeIntentDigest,
   defaultExecutionConstraints,
   hexToBytes,
   MULTISIG_AUTH_DOMAIN,
@@ -16,9 +15,10 @@ import {
   createPoseidonHelpers,
   runInnerCircuit,
   withCircuitLock,
-  type IntentWitness,
+  type TransactionIntentWitness,
   type TomlTable,
 } from "./tx_proof_shared.ts";
+import { computeTransactionIntentDigest } from "./eip8182.ts";
 
 const logger = createFfiLogger("derive_multisig_policy");
 
@@ -79,7 +79,7 @@ async function main() {
       hexToBytes(canonicalSigners[1].value.privateKey),
     );
 
-    const intent: IntentWitness = {
+    const transactionIntent: TransactionIntentWitness = {
       authorizingAddress: semanticIntent.authorizingAddress,
       policyVersion: semanticIntent.policyVersion,
       operationKind: semanticIntent.operationKind,
@@ -93,17 +93,17 @@ async function main() {
       validUntilSeconds: semanticIntent.validUntilSeconds,
       executionChainId: semanticIntent.executionChainId,
       executionConstraints,
-      intentDigest: computeIntentDigest(
-        {
-          ...semanticIntent,
-          executionConstraints,
-        },
-        helpers.pHash,
-      ),
+      transactionIntentDigest: computeTransactionIntentDigest(helpers.pHash, {
+        ...semanticIntent,
+        executionConstraintsFlags: executionConstraints.executionConstraintsFlags,
+        lockedOutputBinding0: executionConstraints.lockedOutputBinding0,
+        lockedOutputBinding1: executionConstraints.lockedOutputBinding1,
+        lockedOutputBinding2: executionConstraints.lockedOutputBinding2,
+      }),
     };
 
     const witness: TomlTable = {
-      ...buildInnerBaseWitnessFromIntent(intent),
+      ...buildInnerBaseWitnessFromIntent(transactionIntent),
       multisig_policy: {
         signers: canonicalSigners.map((signer) => ({
           x: byteArrayStrings(signer.pubKeyX),

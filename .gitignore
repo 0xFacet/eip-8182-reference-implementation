@@ -8,6 +8,8 @@ tmp/
 *.log
 *.local
 .DS_Store
+__pycache__/
+.pytest_cache/
 
 circuits/target/
 contracts/cache/
@@ -16,3 +18,5 @@ contracts/broadcast/
 contracts/script-output/*
 !contracts/script-output/.gitkeep
 contracts/test/.tmp-real-verifier-fixture.json
+pyspec
+eip-8182.md

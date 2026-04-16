@@ -9,11 +9,12 @@ library PoseidonFieldLib {
 
     uint256 internal constant ORIGIN_TAG_DOMAIN =
         uint256(keccak256("eip-8182.origin_tag")) % FIELD_MODULUS;
-    uint256 internal constant NK_DOMAIN = uint256(keccak256("eip-8182.nk")) % FIELD_MODULUS;
+    uint256 internal constant OWNER_NULLIFIER_KEY_HASH_DOMAIN =
+        uint256(keccak256("eip-8182.owner_nullifier_key_hash")) % FIELD_MODULUS;
     uint256 internal constant OUTPUT_BINDING_DOMAIN =
         uint256(keccak256("eip-8182.output_binding")) % FIELD_MODULUS;
-    uint256 internal constant OUTPUT_SECRET_DOMAIN =
-        uint256(keccak256("eip-8182.output_secret")) % FIELD_MODULUS;
+    uint256 internal constant NOTE_SECRET_SEED_DOMAIN =
+        uint256(keccak256("eip-8182.note_secret_seed")) % FIELD_MODULUS;
     uint256 internal constant AUTH_POLICY_DOMAIN =
         uint256(keccak256("eip-8182.auth_policy")) % FIELD_MODULUS;
     uint256 internal constant AUTH_POLICY_KEY_DOMAIN =
@@ -40,20 +41,20 @@ library PoseidonFieldLib {
         return hash2Raw(4, hash2Raw(hash2Raw(x0, x1), hash2Raw(x2, x3)));
     }
 
-    function outputBinding(uint256 commitment, uint256 outputNoteDataHash) internal pure returns (uint256) {
-        return poseidon3(OUTPUT_BINDING_DOMAIN, commitment, outputNoteDataHash);
+    function outputBinding(uint256 noteCommitment, uint256 outputNoteDataHash) internal pure returns (uint256) {
+        return poseidon3(OUTPUT_BINDING_DOMAIN, noteCommitment, outputNoteDataHash);
     }
 
-    function outputSecretHash(uint256 outputSecret) internal pure returns (uint256) {
-        return poseidon2(OUTPUT_SECRET_DOMAIN, outputSecret);
+    function noteSecretSeedHash(uint256 noteSecretSeed) internal pure returns (uint256) {
+        return poseidon2(NOTE_SECRET_SEED_DOMAIN, noteSecretSeed);
     }
 
-    function userRegistryLeaf(address user, uint256 nullifierKeyHash, uint256 outputSecretHashValue)
+    function userRegistryLeaf(address user, uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHashValue)
         internal
         pure
         returns (uint256)
     {
-        return poseidon4(USER_REGISTRY_LEAF_DOMAIN, uint256(uint160(user)), nullifierKeyHash, outputSecretHashValue);
+        return poseidon4(USER_REGISTRY_LEAF_DOMAIN, uint256(uint160(user)), ownerNullifierKeyHash, noteSecretSeedHashValue);
     }
 
     function authPolicyLeaf(uint256 authDataCommitment, uint256 policyVersion) internal pure returns (uint256) {
@@ -64,7 +65,7 @@ library PoseidonFieldLib {
         return uint256(uint160(poseidon3(AUTH_POLICY_KEY_DOMAIN, uint256(uint160(user)), innerVkHash)));
     }
 
-    function dummyNullifierKeyHash() internal pure returns (uint256) {
-        return poseidon2(NK_DOMAIN, 0xdead);
+    function dummyOwnerNullifierKeyHash() internal pure returns (uint256) {
+        return poseidon2(OWNER_NULLIFIER_KEY_HASH_DOMAIN, 0xdead);
     }
 }

@@ -1,13 +1,13 @@
 use crate::constants::{
-    DUMMY_NK_PREIMAGE,
-    NK_DOMAIN,
-    NULLIFIER_DOMAIN,
+    DUMMY_OWNER_NULLIFIER_KEY_PREIMAGE,
     ORIGIN_MODE_DEFAULT,
     ORIGIN_MODE_REQUIRE_TAGGED,
     ORIGIN_TAG_DOMAIN,
-    OUTPUT_SECRET_DOMAIN,
-    PHANTOM_DOMAIN,
-    RANDOMNESS_DOMAIN,
+    NOTE_NULLIFIER_DOMAIN,
+    NOTE_SECRET_DOMAIN,
+    NOTE_SECRET_SEED_DOMAIN,
+    OWNER_NULLIFIER_KEY_HASH_DOMAIN,
+    PHANTOM_NULLIFIER_DOMAIN,
 };
 use crate::hash_utils::{p_hash2, p_hash3, p_hash4, p_hash6};
 use crate::types::Note;
@@ -16,35 +16,39 @@ pub fn note_commitment(note: Note) -> Field {
     p_hash6([
         note.amount,
         note.owner_address,
-        note.randomness,
-        note.nullifier_key_hash,
+        note.note_secret,
+        note.owner_nullifier_key_hash,
         note.token_address,
         note.origin_tag,
     ])
 }
 
-pub fn nullifier_key_hash(nullifier_key: Field) -> Field {
-    p_hash2([NK_DOMAIN, nullifier_key])
+pub fn owner_nullifier_key_hash(owner_nullifier_key: Field) -> Field {
+    p_hash2([OWNER_NULLIFIER_KEY_HASH_DOMAIN, owner_nullifier_key])
 }
 
-pub fn dummy_nullifier_key_hash() -> Field {
-    p_hash2([NK_DOMAIN, DUMMY_NK_PREIMAGE])
+pub fn dummy_owner_nullifier_key_hash() -> Field {
+    p_hash2([OWNER_NULLIFIER_KEY_HASH_DOMAIN, DUMMY_OWNER_NULLIFIER_KEY_PREIMAGE])
 }
 
-pub fn real_nullifier(nullifier_key: Field, randomness: Field) -> Field {
-    p_hash3([NULLIFIER_DOMAIN, nullifier_key, randomness])
+pub fn note_nullifier(owner_nullifier_key: Field, note_secret: Field) -> Field {
+    p_hash3([NOTE_NULLIFIER_DOMAIN, owner_nullifier_key, note_secret])
 }
 
-pub fn phantom_nullifier(nullifier_key: Field, intent_nullifier: Field, slot_index: Field) -> Field {
-    p_hash4([PHANTOM_DOMAIN, nullifier_key, intent_nullifier, slot_index])
+pub fn phantom_nullifier(
+    owner_nullifier_key: Field,
+    transaction_replay_id: Field,
+    input_index: Field,
+) -> Field {
+    p_hash4([PHANTOM_NULLIFIER_DOMAIN, owner_nullifier_key, transaction_replay_id, input_index])
 }
 
-pub fn output_secret_hash(output_secret: Field) -> Field {
-    p_hash2([OUTPUT_SECRET_DOMAIN, output_secret])
+pub fn note_secret_seed_hash(note_secret_seed: Field) -> Field {
+    p_hash2([NOTE_SECRET_SEED_DOMAIN, note_secret_seed])
 }
 
-pub fn output_randomness(output_secret: Field, intent_nullifier: Field, slot_index: Field) -> Field {
-    p_hash4([RANDOMNESS_DOMAIN, output_secret, intent_nullifier, slot_index])
+pub fn note_secret(note_secret_seed: Field, transaction_replay_id: Field, output_index: Field) -> Field {
+    p_hash4([NOTE_SECRET_DOMAIN, note_secret_seed, transaction_replay_id, output_index])
 }
 
 pub fn deposit_origin_tag(
@@ -52,7 +56,7 @@ pub fn deposit_origin_tag(
     depositor_address: Field,
     token_address: Field,
     public_amount_in: Field,
-    intent_nullifier: Field,
+    transaction_replay_id: Field,
 ) -> Field {
     p_hash6([
         ORIGIN_TAG_DOMAIN,
@@ -60,7 +64,7 @@ pub fn deposit_origin_tag(
         depositor_address,
         token_address,
         public_amount_in,
-        intent_nullifier,
+        transaction_replay_id,
     ])
 }
 
@@ -170,8 +174,8 @@ fn test_note_commitment_deterministic() {
     let note = Note {
         amount: 1000,
         owner_address: 0x7e5f4552091a69125d5dfcb7b8c2659029395bdf,
-        randomness: 0x7777,
-        nullifier_key_hash: nullifier_key_hash(0x9999),
+        note_secret: note_secret(0xbeef, 0xaaaa, 0),
+        owner_nullifier_key_hash: owner_nullifier_key_hash(0x9999),
         token_address: 0x1111,
         origin_tag: 0x5555,
     };
@@ -182,56 +186,56 @@ fn test_note_commitment_deterministic() {
 }
 
 #[test]
-fn test_nullifier_key_hash_deterministic() {
-    let h1 = nullifier_key_hash(0x9999);
-    let h2 = nullifier_key_hash(0x9999);
+fn test_owner_nullifier_key_hash_deterministic() {
+    let h1 = owner_nullifier_key_hash(0x9999);
+    let h2 = owner_nullifier_key_hash(0x9999);
     assert(h1 == h2);
     assert(h1 != 0);
-    let h3 = nullifier_key_hash(0x8888);
+    let h3 = owner_nullifier_key_hash(0x8888);
     assert(h3 != h1);
 }
 
 #[test]
-fn test_dummy_nullifier_key_hash() {
-    let d = dummy_nullifier_key_hash();
+fn test_dummy_owner_nullifier_key_hash() {
+    let d = dummy_owner_nullifier_key_hash();
     assert(d != 0);
-    let real = nullifier_key_hash(0x9999);
+    let real = owner_nullifier_key_hash(0x9999);
     assert(d != real);
 }
 
 #[test]
-fn test_real_nullifier_deterministic() {
-    let n1 = real_nullifier(0x9999, 0x7777);
-    let n2 = real_nullifier(0x9999, 0x7777);
+fn test_note_nullifier_deterministic() {
+    let n1 = note_nullifier(0x9999, note_secret(0xbeef, 0xaaaa, 0));
+    let n2 = note_nullifier(0x9999, note_secret(0xbeef, 0xaaaa, 0));
     assert(n1 == n2);
     assert(n1 != 0);
-    let n3 = real_nullifier(0x9999, 0x8888);
+    let n3 = note_nullifier(0x9999, note_secret(0xbeef, 0xaaaa, 1));
     assert(n3 != n1);
 }
 
 #[test]
 fn test_phantom_nullifier_differs_from_real() {
-    let real = real_nullifier(0x9999, 0x7777);
+    let real = note_nullifier(0x9999, note_secret(0xbeef, 0xaaaa, 0));
     let phantom = phantom_nullifier(0x9999, 0xaaaa, 0);
     assert(real != phantom);
 }
 
 #[test]
-fn test_output_secret_hash_deterministic() {
-    let h1 = output_secret_hash(0xbeef);
-    let h2 = output_secret_hash(0xbeef);
+fn test_note_secret_seed_hash_deterministic() {
+    let h1 = note_secret_seed_hash(0xbeef);
+    let h2 = note_secret_seed_hash(0xbeef);
     assert(h1 == h2);
     assert(h1 != 0);
-    let h3 = output_secret_hash(0xdead);
+    let h3 = note_secret_seed_hash(0xdead);
     assert(h3 != h1);
 }
 
 #[test]
-fn test_output_randomness_deterministic() {
-    let r1 = output_randomness(0xbeef, 0xaaaa, 0);
-    let r2 = output_randomness(0xbeef, 0xaaaa, 0);
+fn test_note_secret_deterministic() {
+    let r1 = note_secret(0xbeef, 0xaaaa, 0);
+    let r2 = note_secret(0xbeef, 0xaaaa, 0);
     assert(r1 == r2);
-    let r3 = output_randomness(0xbeef, 0xaaaa, 1);
+    let r3 = note_secret(0xbeef, 0xaaaa, 1);
     assert(r3 != r1);
 }
 

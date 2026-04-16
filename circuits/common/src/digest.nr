@@ -1,11 +1,11 @@
 use crate::constants::{
-    INTENT_DIGEST_DOMAIN,
-    INTENT_DOMAIN,
+    TRANSACTION_INTENT_DIGEST_DOMAIN,
+    TRANSACTION_REPLAY_ID_DOMAIN,
     OUTPUT_BINDING_DOMAIN,
 };
 use crate::hash_utils::{p_hash3, p_hash5, p_hash17};
 
-pub fn intent_digest(
+pub fn transaction_intent_digest(
     policy_version: Field,
     authorizing_address: Field,
     operation_kind: Field,
@@ -24,7 +24,7 @@ pub fn intent_digest(
     execution_chain_id: Field,
 ) -> Field {
     p_hash17([
-        INTENT_DIGEST_DOMAIN,
+        TRANSACTION_INTENT_DIGEST_DOMAIN,
         policy_version,
         authorizing_address,
         operation_kind,
@@ -48,15 +48,15 @@ pub fn output_binding(commitment: Field, output_note_data_hash: Field) -> Field 
     p_hash3([OUTPUT_BINDING_DOMAIN, commitment, output_note_data_hash])
 }
 
-pub fn intent_nullifier(
-    nullifier_key: Field,
+pub fn transaction_replay_id(
+    owner_nullifier_key: Field,
     authorizing_address: Field,
     execution_chain_id: Field,
     nonce: Field,
 ) -> Field {
     p_hash5([
-        INTENT_DOMAIN,
-        nullifier_key,
+        TRANSACTION_REPLAY_ID_DOMAIN,
+        owner_nullifier_key,
         authorizing_address,
         execution_chain_id,
         nonce,
@@ -64,45 +64,45 @@ pub fn intent_nullifier(
 }
 
 #[test]
-fn test_intent_digest_deterministic() {
-    let d1 = intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
-    let d2 = intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
+fn test_transaction_intent_digest_deterministic() {
+    let d1 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
+    let d2 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
     assert(d1 == d2);
     assert(d1 != 0);
 }
 
 #[test]
-fn test_different_nonce_different_intent_digest() {
-    let d1 = intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
-    let d2 = intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 43, 1700000000, 1);
+fn test_different_nonce_different_transaction_intent_digest() {
+    let d1 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
+    let d2 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 43, 1700000000, 1);
     assert(d1 != d2);
 }
 
 #[test]
-fn test_execution_constraints_change_intent_digest() {
-    let d1 = intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
-    let d2 = intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 1, 0x1234, 0, 0, 42, 1700000000, 1);
+fn test_execution_constraints_change_transaction_intent_digest() {
+    let d1 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
+    let d2 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 1, 0x1234, 0, 0, 42, 1700000000, 1);
     assert(d1 != d2);
 }
 
 #[test]
-fn test_intent_nullifier_reuses_nonce_domain() {
-    let n1 = intent_nullifier(0x9999, 0xabc, 1, 42);
-    let n2 = intent_nullifier(0x9999, 0xabc, 1, 42);
+fn test_transaction_replay_id_reuses_nonce_domain() {
+    let n1 = transaction_replay_id(0x9999, 0xabc, 1, 42);
+    let n2 = transaction_replay_id(0x9999, 0xabc, 1, 42);
     assert(n1 == n2);
     assert(n1 != 0);
 }
 
 #[test]
-fn test_intent_nullifier_changes_with_nonce() {
-    let n1 = intent_nullifier(0x9999, 0xabc, 1, 42);
-    let n2 = intent_nullifier(0x9999, 0xabc, 1, 43);
+fn test_transaction_replay_id_changes_with_nonce() {
+    let n1 = transaction_replay_id(0x9999, 0xabc, 1, 42);
+    let n2 = transaction_replay_id(0x9999, 0xabc, 1, 43);
     assert(n1 != n2);
 }
 
 #[test]
-fn test_intent_nullifier_ignores_payment_fields() {
-    let n1 = intent_nullifier(0x9999, 0xabc, 1, 42);
-    let n2 = intent_nullifier(0x9999, 0xabc, 1, 42);
+fn test_transaction_replay_id_ignores_payment_fields() {
+    let n1 = transaction_replay_id(0x9999, 0xabc, 1, 42);
+    let n2 = transaction_replay_id(0x9999, 0xabc, 1, 42);
     assert(n1 == n2);
 }

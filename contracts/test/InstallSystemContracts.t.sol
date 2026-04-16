@@ -30,7 +30,7 @@ contract InstallSystemContractsScriptTest is Test, InstallSystemTestBase {
         assertEq(manifest.readAddress(".poolAddress"), POOL_ADDRESS);
         assertEq(manifest.readUint(".poolCodeSize"), POOL_ADDRESS.code.length);
         assertEq(manifest.readBytes32(".poolCodeHash"), keccak256(POOL_ADDRESS.code));
-        assertGt(manifest.readUint(".derivedRoots.commitmentRoot"), 0);
+        assertGt(manifest.readUint(".derivedRoots.noteCommitmentRoot"), 0);
 
         string memory stateDump = vm.readFile(STATE_DUMP_PATH);
         string[] memory rootKeys = vm.parseJsonKeys(stateDump, ".");

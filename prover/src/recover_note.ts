@@ -12,7 +12,7 @@ function toHex(value: bigint): string {
 async function main() {
   const params = JSON.parse(process.argv[2]) as {
     ownerAddress: string;
-    nullifierKey: string;
+    ownerNullifierKey: string;
     deliverySecret: string;
     leafIndex: string;
     commitment: string;
@@ -48,7 +48,7 @@ async function main() {
 
   const notes = await noteStore.getUnspentNotes(
     BigInt(params.ownerAddress),
-    BigInt(params.nullifierKey),
+    BigInt(params.ownerNullifierKey),
     BigInt(params.deliverySecret),
   );
 

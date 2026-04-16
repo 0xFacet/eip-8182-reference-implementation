@@ -9,7 +9,7 @@ import {RealProofVerifierPrecompile} from "../mocks/RealProofVerifierPrecompile.
 
 contract ShieldedPoolTestHarness is ShieldedPool {
     function seedAcceptedRootsForTest(
-        uint256 commitmentRoot,
+        uint256 noteCommitmentRoot,
         uint256 userRegistryRoot,
         uint256 authPolicyRoot,
         uint256 snapshotBlock
@@ -17,12 +17,12 @@ contract ShieldedPoolTestHarness is ShieldedPool {
         uint256 userSlot = snapshotBlock % (USER_REGISTRY_ROOT_HISTORY_BLOCKS + 1);
         uint256 authSlot = snapshotBlock % (AUTH_POLICY_ROOT_HISTORY_BLOCKS + 1);
 
-        currentCommitmentRoot = commitmentRoot;
+        currentNoteCommitmentRoot = noteCommitmentRoot;
         currentUserRegistryRoot = userRegistryRoot;
         currentAuthPolicyRoot = authPolicyRoot;
 
-        commitmentRootHistoryCount = 1;
-        commitmentRootHistory[0] = commitmentRoot;
+        noteCommitmentRootHistoryCount = 1;
+        noteCommitmentRootHistory[0] = noteCommitmentRoot;
 
         userRegistryLastSnapshotBlock = snapshotBlock;
         userRegistryRootHistory[userSlot] = userRegistryRoot;
@@ -37,12 +37,12 @@ contract ShieldedPoolTestHarness is ShieldedPool {
         nextLeafIndex = nextLeafIndex_;
     }
 
-    function setCommitmentRootHistoryCountForTest(uint256 commitmentRootHistoryCount_) external {
-        commitmentRootHistoryCount = commitmentRootHistoryCount_;
+    function setCommitmentRootHistoryCountForTest(uint256 noteCommitmentRootHistoryCount_) external {
+        noteCommitmentRootHistoryCount = noteCommitmentRootHistoryCount_;
     }
 
     function emptyHashCacheInitializedForTest() external view returns (bool) {
-        return commitmentEmptyHashes[COMMITMENT_TREE_DEPTH - 1] != 0 && sparseEmptyHashes[REGISTRY_TREE_DEPTH - 1] != 0;
+        return noteCommitmentEmptyHashes[COMMITMENT_TREE_DEPTH - 1] != 0 && sparseEmptyHashes[REGISTRY_TREE_DEPTH - 1] != 0;
     }
 }
 
@@ -54,7 +54,7 @@ abstract contract InstallSystemTestBase is InstallSystemContractsBase {
     address internal constant ZK_TRANSCRIPT_LIBRARY_ADDRESS = 0x441DC930704671aa1F8b089739Eb4317e196f124;
 
     struct AcceptedRootsSeed {
-        uint256 commitmentRoot;
+        uint256 noteCommitmentRoot;
         uint256 userRegistryRoot;
         uint256 authPolicyRoot;
         uint256 snapshotBlock;
@@ -77,7 +77,7 @@ abstract contract InstallSystemTestBase is InstallSystemContractsBase {
         pure
         returns (AcceptedRootsSeed memory seed)
     {
-        seed.commitmentRoot = publicInputs.merkleRoot;
+        seed.noteCommitmentRoot = publicInputs.noteCommitmentRoot;
         seed.userRegistryRoot = publicInputs.registryRoot;
         seed.authPolicyRoot = publicInputs.authPolicyRegistryRoot;
         seed.snapshotBlock = snapshotBlock;
@@ -87,7 +87,7 @@ abstract contract InstallSystemTestBase is InstallSystemContractsBase {
         bytes memory poolCode = _swapInTestHarness();
         vm.startPrank(INSTALLER_DEPLOYER);
         ShieldedPoolTestHarness(POOL_ADDRESS).seedAcceptedRootsForTest(
-            seed.commitmentRoot, seed.userRegistryRoot, seed.authPolicyRoot, seed.snapshotBlock
+            seed.noteCommitmentRoot, seed.userRegistryRoot, seed.authPolicyRoot, seed.snapshotBlock
         );
         vm.stopPrank();
         _restorePoolCode(poolCode);
@@ -109,10 +109,10 @@ abstract contract InstallSystemTestBase is InstallSystemContractsBase {
         _restorePoolCode(poolCode);
     }
 
-    function setCommitmentRootHistoryCountForTest(uint256 commitmentRootHistoryCount_) internal {
+    function setCommitmentRootHistoryCountForTest(uint256 noteCommitmentRootHistoryCount_) internal {
         bytes memory poolCode = _swapInTestHarness();
         vm.startPrank(INSTALLER_DEPLOYER);
-        ShieldedPoolTestHarness(POOL_ADDRESS).setCommitmentRootHistoryCountForTest(commitmentRootHistoryCount_);
+        ShieldedPoolTestHarness(POOL_ADDRESS).setCommitmentRootHistoryCountForTest(noteCommitmentRootHistoryCount_);
         vm.stopPrank();
         _restorePoolCode(poolCode);
     }

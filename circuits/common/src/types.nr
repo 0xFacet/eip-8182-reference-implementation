@@ -3,15 +3,15 @@ use crate::constants::{AUTH_POLICY_TREE_DEPTH, COMMITMENT_TREE_DEPTH, USER_TREE_
 pub struct Note {
     pub amount: Field,
     pub owner_address: Field,
-    pub randomness: Field,
-    pub nullifier_key_hash: Field,
+    pub note_secret: Field,
+    pub owner_nullifier_key_hash: Field,
     pub token_address: Field,
     pub origin_tag: Field,
 }
 
-pub struct MinimalUserRegistryLeaf {
-    pub nullifier_key_hash: Field,
-    pub output_secret_hash: Field,
+pub struct UserRegistryLeaf {
+    pub owner_nullifier_key_hash: Field,
+    pub note_secret_seed_hash: Field,
 }
 
 pub struct AuthPolicyLeaf {

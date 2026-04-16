@@ -10,21 +10,21 @@ import {PoseidonFieldLib} from "../src/libraries/PoseidonFieldLib.sol";
 
 contract ShieldedPoolInstallHarness is ShieldedPool {
     function initialize() external {
-        uint256 commitmentRoot = _deriveEmptyRoot(COMMITMENT_TREE_DEPTH);
+        uint256 noteCommitmentRoot = _deriveEmptyRoot(COMMITMENT_TREE_DEPTH);
         uint256 userRegistryRoot = _deriveEmptyRoot(REGISTRY_TREE_DEPTH);
         uint256 authPolicyRoot = userRegistryRoot;
 
         _seedEmptyHashCache();
-        currentCommitmentRoot = commitmentRoot;
+        currentNoteCommitmentRoot = noteCommitmentRoot;
         currentUserRegistryRoot = userRegistryRoot;
         currentAuthPolicyRoot = authPolicyRoot;
     }
 
     function _seedEmptyHashCache() private {
-        commitmentEmptyHashes[0] = 0;
+        noteCommitmentEmptyHashes[0] = 0;
         for (uint256 level = 1; level < COMMITMENT_TREE_DEPTH; ++level) {
-            commitmentEmptyHashes[level] =
-                PoseidonFieldLib.hash2Raw(commitmentEmptyHashes[level - 1], commitmentEmptyHashes[level - 1]);
+            noteCommitmentEmptyHashes[level] =
+                PoseidonFieldLib.hash2Raw(noteCommitmentEmptyHashes[level - 1], noteCommitmentEmptyHashes[level - 1]);
         }
 
         sparseEmptyHashes[0] = 0;
@@ -48,15 +48,15 @@ abstract contract InstallSystemContractsBase is CommonBase {
     address internal constant POSEIDON_LIBRARY_ADDRESS = 0x3333333C0A88F9BE4fd23ed0536F9B6c427e3B93;
     string internal constant POSEIDON_RUNTIME_FIXTURE_PATH = "test/fixtures/poseidon_t3_runtime.hex";
 
-    function install() internal returns (uint256 commitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot) {
+    function install() internal returns (uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot) {
         _installPoseidonLibrary();
         _initializePool();
-        (commitmentRoot, userRegistryRoot, authPolicyRoot) = ShieldedPool(POOL_ADDRESS).getCurrentRoots();
-        _assertExpectedRoots(commitmentRoot, userRegistryRoot, authPolicyRoot);
+        (noteCommitmentRoot, userRegistryRoot, authPolicyRoot) = ShieldedPool(POOL_ADDRESS).getCurrentRoots();
+        _assertExpectedRoots(noteCommitmentRoot, userRegistryRoot, authPolicyRoot);
     }
 
     function writeManifest(
-        uint256 commitmentRoot,
+        uint256 noteCommitmentRoot,
         uint256 userRegistryRoot,
         uint256 authPolicyRoot,
         string memory outputPath
@@ -69,7 +69,7 @@ abstract contract InstallSystemContractsBase is CommonBase {
         vm.serializeBytes32(manifestKey, "poolCodeHash", bytes32(keccak256(poolCode)));
         string memory manifestJson = vm.serializeUint(manifestKey, "poolCodeSize", poolCode.length);
         vm.writeJson(manifestJson, outputPath);
-        vm.writeJson(_derivedRootsJson(commitmentRoot, userRegistryRoot, authPolicyRoot), outputPath, ".derivedRoots");
+        vm.writeJson(_derivedRootsJson(noteCommitmentRoot, userRegistryRoot, authPolicyRoot), outputPath, ".derivedRoots");
         _prettifyJson(outputPath);
     }
 
@@ -93,11 +93,11 @@ abstract contract InstallSystemContractsBase is CommonBase {
         vm.etch(POSEIDON_LIBRARY_ADDRESS, poseidonCode);
     }
 
-    function _assertExpectedRoots(uint256 commitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot) private pure {
+    function _assertExpectedRoots(uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot) private pure {
         uint256 expectedCommitmentRoot = _deriveEmptyRoot(INSTALL_COMMITMENT_TREE_DEPTH);
         uint256 expectedSparseRoot = _deriveEmptyRoot(INSTALL_REGISTRY_TREE_DEPTH);
 
-        require(commitmentRoot == expectedCommitmentRoot, "unexpected commitment root");
+        require(noteCommitmentRoot == expectedCommitmentRoot, "unexpected commitment root");
         require(userRegistryRoot == expectedSparseRoot, "unexpected user registry root");
         require(authPolicyRoot == expectedSparseRoot, "unexpected auth policy root");
     }
@@ -108,13 +108,13 @@ abstract contract InstallSystemContractsBase is CommonBase {
         }
     }
 
-    function _derivedRootsJson(uint256 commitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot)
+    function _derivedRootsJson(uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot)
         private
         returns (string memory derivedRoots)
     {
         string memory derivedRootsKey = "derivedRoots";
         vm.serializeJson(derivedRootsKey, "{}");
-        vm.serializeUint(derivedRootsKey, "commitmentRoot", commitmentRoot);
+        vm.serializeUint(derivedRootsKey, "noteCommitmentRoot", noteCommitmentRoot);
         vm.serializeUint(derivedRootsKey, "userRegistryRoot", userRegistryRoot);
         derivedRoots = vm.serializeUint(derivedRootsKey, "authPolicyRoot", authPolicyRoot);
     }
@@ -149,11 +149,11 @@ contract InstallSystemContracts is Script, InstallSystemContractsBase {
     function run() public {
         string memory manifestPath = _envManifestPath();
         string memory stateDumpPath = _envStateDumpPath();
-        (uint256 commitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot) =
+        (uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot) =
             install();
-        writeManifest(commitmentRoot, userRegistryRoot, authPolicyRoot, manifestPath);
+        writeManifest(noteCommitmentRoot, userRegistryRoot, authPolicyRoot, manifestPath);
         writeStateDump(stateDumpPath);
-        _logInstall(commitmentRoot, userRegistryRoot, authPolicyRoot, manifestPath, stateDumpPath);
+        _logInstall(noteCommitmentRoot, userRegistryRoot, authPolicyRoot, manifestPath, stateDumpPath);
     }
 
     function _envManifestPath() internal view returns (string memory) {
@@ -165,7 +165,7 @@ contract InstallSystemContracts is Script, InstallSystemContractsBase {
     }
 
     function _logInstall(
-        uint256 commitmentRoot,
+        uint256 noteCommitmentRoot,
         uint256 userRegistryRoot,
         uint256 authPolicyRoot,
         string memory manifestPath,
@@ -174,7 +174,7 @@ contract InstallSystemContracts is Script, InstallSystemContractsBase {
         console2.log("manifest:", manifestPath);
         console2.log("state dump:", stateDumpPath);
         console2.log("pool:", POOL_ADDRESS);
-        console2.log("commitment root:", commitmentRoot);
+        console2.log("commitment root:", noteCommitmentRoot);
         console2.log("user registry root:", userRegistryRoot);
         console2.log("auth policy root:", authPolicyRoot);
     }

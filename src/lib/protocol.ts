@@ -2,10 +2,10 @@ import { keccak_256 } from '@noble/hashes/sha3'
 import {
   AUTH_VK_DOMAIN,
   FIELD_MODULUS,
-  INTENT_DOMAIN,
-  INTENT_DIGEST_DOMAIN,
-  NULLIFIER_DOMAIN,
+  NOTE_NULLIFIER_DOMAIN,
   OUTPUT_BINDING_DOMAIN,
+  TRANSACTION_INTENT_DIGEST_DOMAIN,
+  TRANSACTION_REPLAY_ID_DOMAIN,
 } from './domainConstants.ts'
 
 export {
@@ -13,15 +13,15 @@ export {
   AUTH_POLICY_KEY_DOMAIN,
   AUTH_VK_DOMAIN,
   FIELD_MODULUS,
-  INTENT_DIGEST_DOMAIN,
-  INTENT_DOMAIN,
-  NK_DOMAIN,
-  NULLIFIER_DOMAIN,
+  NOTE_NULLIFIER_DOMAIN,
+  NOTE_SECRET_DOMAIN,
+  NOTE_SECRET_SEED_DOMAIN,
   ORIGIN_TAG_DOMAIN,
+  OWNER_NULLIFIER_KEY_HASH_DOMAIN,
   OUTPUT_BINDING_DOMAIN,
-  OUTPUT_SECRET_DOMAIN,
-  PHANTOM_DOMAIN,
-  RANDOMNESS_DOMAIN,
+  PHANTOM_NULLIFIER_DOMAIN,
+  TRANSACTION_INTENT_DIGEST_DOMAIN,
+  TRANSACTION_REPLAY_ID_DOMAIN,
   USER_REGISTRY_LEAF_DOMAIN,
 } from './domainConstants.ts'
 
@@ -97,7 +97,7 @@ export interface ShieldedPoolIntentParams {
   verifyingContract?: AddressLike
 }
 
-export interface IntentDigestParams {
+export interface TransactionIntentDigestParams {
   authorizingAddress: AddressLike
   policyVersion: bigint
   operationKind: bigint
@@ -301,13 +301,13 @@ export function computeSingleSigAuthorizationSigningHash(
   return keccak_256(signingPreimage)
 }
 
-export function computeIntentDigest(
-  params: IntentDigestParams,
+export function computeTransactionIntentDigest(
+  params: TransactionIntentDigestParams,
   pHash: (values: bigint[]) => bigint,
 ): bigint {
   const constraints = normalizeExecutionConstraints(params.executionConstraints)
   return pHash([
-    INTENT_DIGEST_DOMAIN,
+    TRANSACTION_INTENT_DIGEST_DOMAIN,
     params.policyVersion,
     addressToBigInt(params.authorizingAddress),
     params.operationKind,
@@ -328,35 +328,35 @@ export function computeIntentDigest(
 }
 
 export function computeOutputBinding(
-  commitment: bigint,
+  noteCommitment: bigint,
   outputNoteDataHash: bigint,
   pHash: (values: bigint[]) => bigint,
 ): bigint {
-  return pHash([OUTPUT_BINDING_DOMAIN, commitment, outputNoteDataHash])
+  return pHash([OUTPUT_BINDING_DOMAIN, noteCommitment, outputNoteDataHash])
 }
 
-export function computeIntentNullifier(
-  nullifierKey: bigint,
+export function computeTransactionReplayId(
+  ownerNullifierKey: bigint,
   authorizingAddress: AddressLike,
   executionChainId: bigint,
   nonce: bigint,
   pHash: (values: bigint[]) => bigint,
 ): bigint {
   return pHash([
-    INTENT_DOMAIN,
-    nullifierKey,
+    TRANSACTION_REPLAY_ID_DOMAIN,
+    ownerNullifierKey,
     addressToBigInt(authorizingAddress),
     executionChainId,
     nonce,
   ])
 }
 
-export function computeRealNullifier(
-  nullifierKey: bigint,
-  randomness: bigint,
+export function computeNoteNullifier(
+  ownerNullifierKey: bigint,
+  noteSecret: bigint,
   pHash: (values: bigint[]) => bigint,
 ): bigint {
-  return pHash([NULLIFIER_DOMAIN, nullifierKey, randomness])
+  return pHash([NOTE_NULLIFIER_DOMAIN, ownerNullifierKey, noteSecret])
 }
 
 export function computeAuthVkHash(

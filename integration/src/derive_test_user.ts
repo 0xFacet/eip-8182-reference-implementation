@@ -5,8 +5,6 @@ import {
   computeSingleSigAuthorizationSigningHash,
   DEPOSIT_OPERATION_KIND,
   hexToBytes,
-  NK_DOMAIN,
-  OUTPUT_SECRET_DOMAIN,
   secp256k1PubkeyToAddress,
   singleSigAuthDataCommitment,
 } from "../../src/lib/protocol.ts";
@@ -20,26 +18,30 @@ import {
   type SingleSigAuthorizationWitness,
   type TomlTable,
 } from "./tx_proof_shared.ts";
+import {
+  computeOwnerNullifierKeyHash,
+  computeNoteSecretSeedHash,
+} from "./eip8182.ts";
 
 const logger = createFfiLogger("derive_test_user");
 
 async function main() {
   const params = JSON.parse(process.argv[2]) as {
-    nullifierKey: string;
-    outputSecret: string;
+    ownerNullifierKey: string;
+    noteSecretSeed: string;
     deliverySecret: string;
     signingPrivateKey: string;
   };
 
   const result = await withCircuitLock(async () => {
     const helpers = await createPoseidonHelpers();
-    const nullifierKey = BigInt(params.nullifierKey);
-    const outputSecret = BigInt(params.outputSecret);
+    const ownerNullifierKey = BigInt(params.ownerNullifierKey);
+    const noteSecretSeed = BigInt(params.noteSecretSeed);
     const deliverySecret = BigInt(params.deliverySecret);
     const signingPrivateKey = hexToBytes(params.signingPrivateKey);
 
-    const nkHash = helpers.pHash([NK_DOMAIN, nullifierKey]);
-    const osHash = helpers.pHash([OUTPUT_SECRET_DOMAIN, outputSecret]);
+    const ownerNullifierKeyHash = computeOwnerNullifierKeyHash(helpers.pHash, ownerNullifierKey);
+    const noteSecretSeedHash = computeNoteSecretSeedHash(helpers.pHash, noteSecretSeed);
 
     const signingPubKey = secp.getPublicKey(signingPrivateKey, false);
     const pubKeyX = signingPubKey.slice(1, 33);
@@ -120,8 +122,8 @@ async function main() {
     );
 
     return {
-      nkHash: nkHash.toString(),
-      osHash: osHash.toString(),
+      ownerNullifierKeyHash: ownerNullifierKeyHash.toString(),
+      noteSecretSeedHash: noteSecretSeedHash.toString(),
       authDataCommitment: authDataCommitment.toString(),
       innerVkHash: inner.innerVkHash.toString(),
       deliveryPubKey:

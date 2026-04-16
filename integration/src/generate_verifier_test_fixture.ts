@@ -15,6 +15,7 @@ import {
   hexToBytes,
 } from "../../src/lib/protocol.ts";
 import {
+  assertAuthPolicyRoot,
   buildCommonTxArtifacts,
   buildSingleSigAuthorizationWitness,
   byteArrayStrings,
@@ -57,13 +58,13 @@ async function main() {
     depositorAddress: `0x${authorizingAddress.toString(16).padStart(40, "0")}`,
     amount: "1000",
     tokenAddress: "0",
-    nullifierKey: "0x9999",
-    outputSecret: "0xbeef",
+    ownerNullifierKey: "0x9999",
+    noteSecretSeed: "0xbeef",
     policyVersion: "1",
     nonce: "42",
     validUntilSeconds: "1700000000",
     executionChainId: "11155111",
-    commitmentRoot: "0",
+    noteCommitmentRoot: "0",
     userRegistryRoot: "0",
     authPolicyRoot: "0",
     deliverySchemeId: "1",
@@ -79,8 +80,8 @@ async function main() {
   const userLeaf = helpers.pHash([
     USER_REGISTRY_LEAF_DOMAIN,
     initialCommon.authorizingAddress,
-    initialCommon.nkHash,
-    initialCommon.osHash,
+    initialCommon.ownerNullifierKeyHash,
+    initialCommon.noteSecretSeedHash,
   ]);
   const userRegistryRoot = merkleRootFromKey(
     userLeaf,
@@ -142,12 +143,13 @@ async function main() {
   const common = buildCommonTxArtifacts(
     {
       ...baseParams,
-      commitmentRoot: `0x${commitmentRoot.toString(16)}`,
+      noteCommitmentRoot: `0x${commitmentRoot.toString(16)}`,
       userRegistryRoot: `0x${userRegistryRoot.toString(16)}`,
       authPolicyRoot: `0x${authPolicyRoot.toString(16)}`,
     },
     helpers,
   );
+  assertAuthPolicyRoot(common, authDataCommitment, inner.innerVkHash, helpers);
 
   const proof = proveOuterTransaction(common, authDataCommitment, inner);
   writeFileSync(

@@ -39,8 +39,8 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         "0x3333333333333333333333333333333333333333333333333333333333333333";
 
     struct PreparedUser {
-        uint256 nkHash;
-        uint256 osHash;
+        uint256 ownerNullifierKeyHash;
+        uint256 noteSecretSeedHash;
         uint256 authDataCommitment;
         uint256 innerVkHash;
         bytes deliveryPubKey;
@@ -53,8 +53,8 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
 
     struct UserSecrets {
         address account;
-        uint256 nullifierKey;
-        uint256 outputSecret;
+        uint256 ownerNullifierKey;
+        uint256 noteSecretSeed;
         uint256 deliverySecret;
         string signingPrivateKey;
     }
@@ -66,10 +66,10 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         bytes noteData1;
         bytes noteData2;
         uint256 note0Amount;
-        uint256 note0Randomness;
+        uint256 note0NoteSecret;
         uint256 note0OriginTag;
         uint256 note1Amount;
-        uint256 note1Randomness;
+        uint256 note1NoteSecret;
         uint256 note1OriginTag;
     }
 
@@ -80,11 +80,11 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         uint256 authPolicyRoot;
         uint256 inputLeafIndex;
         uint256 inputAmount;
-        uint256 inputRandomness;
+        uint256 inputNoteSecret;
         uint256 inputOriginTag;
         address recipient;
-        uint256 recipientNkHash;
-        uint256 recipientOsHash;
+        uint256 recipientOwnerNullifierKeyHash;
+        uint256 recipientNoteSecretSeedHash;
         uint256 transferAmount;
         uint256 changeAmount;
         uint256[TREE_DEPTH] inputSiblings;
@@ -99,7 +99,7 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         uint256 authPolicyRoot;
         uint256 inputLeafIndex;
         uint256 inputAmount;
-        uint256 inputRandomness;
+        uint256 inputNoteSecret;
         uint256 inputOriginTag;
         address publicRecipient;
         uint256 withdrawAmount;
@@ -113,8 +113,8 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         uint256 leafIndex;
         uint256 amount;
         uint256 ownerAddress;
-        uint256 randomness;
-        uint256 nullifierKeyHash;
+        uint256 noteSecret;
+        uint256 ownerNullifierKeyHash;
         uint256 tokenAddress;
         uint256 originTag;
     }
@@ -139,7 +139,7 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
     }
 
     function _assertAndExecuteDepositFixture(ProofFixture memory fixture) internal {
-        assertEq(fixture.pubInputs.merkleRoot, _currentCommitmentRoot(), "commit root");
+        assertEq(fixture.pubInputs.noteCommitmentRoot, _currentNoteCommitmentRoot(), "commit root");
         assertEq(fixture.pubInputs.registryRoot, _currentUserRegistryRoot(), "user root");
         assertEq(fixture.pubInputs.authPolicyRegistryRoot, _currentAuthPolicyRoot(), "auth root");
         assertEq(fixture.noteData0.length, 1328, "note0 ciphertext length");
@@ -174,7 +174,7 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
 
     function _registerAlice(PreparedUser memory user) internal returns (uint256 currentPolicyVersion) {
         vm.prank(ALICE);
-        pool.registerUser(user.nkHash, user.osHash, DELIVERY_SCHEME_ID, user.deliveryPubKey);
+        pool.registerUser(user.ownerNullifierKeyHash, user.noteSecretSeedHash, DELIVERY_SCHEME_ID, user.deliveryPubKey);
 
         (uint32 schemeId, bytes memory storedDeliveryKey) = pool.getDeliveryKey(ALICE);
         assertEq(schemeId, DELIVERY_SCHEME_ID, "delivery scheme stored");
@@ -186,7 +186,7 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
 
     function _registerUserWithoutAuth(address account, PreparedUser memory user) internal {
         vm.prank(account);
-        pool.registerUser(user.nkHash, user.osHash, DELIVERY_SCHEME_ID, user.deliveryPubKey);
+        pool.registerUser(user.ownerNullifierKeyHash, user.noteSecretSeedHash, DELIVERY_SCHEME_ID, user.deliveryPubKey);
 
         (uint32 schemeId, bytes memory storedDeliveryKey) = pool.getDeliveryKey(account);
         assertEq(schemeId, DELIVERY_SCHEME_ID, "delivery scheme stored");
@@ -194,17 +194,17 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
     }
 
     function _deriveTestUser(
-        uint256 nullifierKey,
-        uint256 outputSecret,
+        uint256 ownerNullifierKey,
+        uint256 noteSecretSeed,
         uint256 deliverySecret,
         string memory signingPrivateKey
     ) internal returns (PreparedUser memory user) {
         string memory params = string(
             abi.encodePacked(
-                '{"nullifierKey":"',
-                vm.toString(nullifierKey),
-                '","outputSecret":"',
-                vm.toString(outputSecret),
+                '{"ownerNullifierKey":"',
+                vm.toString(ownerNullifierKey),
+                '","noteSecretSeed":"',
+                vm.toString(noteSecretSeed),
                 '","deliverySecret":"',
                 vm.toString(deliverySecret),
                 '","signingPrivateKey":"',
@@ -214,8 +214,8 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         );
 
         string memory json = _runJsonScript("../integration/src/derive_test_user.ts", params);
-        user.nkHash = vm.parseUint(vm.parseJsonString(json, ".nkHash"));
-        user.osHash = vm.parseUint(vm.parseJsonString(json, ".osHash"));
+        user.ownerNullifierKeyHash = vm.parseUint(vm.parseJsonString(json, ".ownerNullifierKeyHash"));
+        user.noteSecretSeedHash = vm.parseUint(vm.parseJsonString(json, ".noteSecretSeedHash"));
         user.authDataCommitment = vm.parseUint(vm.parseJsonString(json, ".authDataCommitment"));
         user.innerVkHash = vm.parseUint(vm.parseJsonString(json, ".innerVkHash"));
         user.deliveryPubKey = vm.parseJsonBytes(json, ".deliveryPubKey");
@@ -310,7 +310,7 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
     }
 
     function _assertTransferFixture(ProofFixture memory fixture, uint256 expectedChange) internal view {
-        assertEq(fixture.pubInputs.merkleRoot, _currentCommitmentRoot(), "transfer root");
+        assertEq(fixture.pubInputs.noteCommitmentRoot, _currentNoteCommitmentRoot(), "transfer root");
         assertEq(fixture.pubInputs.registryRoot, _currentUserRegistryRoot(), "transfer user root");
         assertEq(fixture.pubInputs.authPolicyRegistryRoot, _currentAuthPolicyRoot(), "transfer auth root");
         assertEq(fixture.pubInputs.publicAmountIn, 0, "transfer amount in");
@@ -342,7 +342,7 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         uint256 expectedWithdrawAmount,
         uint256 expectedChange
     ) internal view {
-        assertEq(fixture.pubInputs.merkleRoot, _currentCommitmentRoot(), "withdraw root");
+        assertEq(fixture.pubInputs.noteCommitmentRoot, _currentNoteCommitmentRoot(), "withdraw root");
         assertEq(fixture.pubInputs.registryRoot, _currentUserRegistryRoot(), "withdraw user root");
         assertEq(fixture.pubInputs.authPolicyRegistryRoot, _currentAuthPolicyRoot(), "withdraw auth root");
         assertEq(fixture.pubInputs.publicAmountOut, expectedWithdrawAmount, "withdraw amount");
@@ -388,10 +388,10 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         fixture.noteData2 = vm.parseJsonBytes(json, ".outputNoteData[2]");
         fixture.pubInputs = _publicInputsFromArray(publicInputs);
         fixture.note0Amount = vm.parseUint(vm.parseJsonString(json, ".note0.amount"));
-        fixture.note0Randomness = vm.parseUint(vm.parseJsonString(json, ".note0.randomness"));
+        fixture.note0NoteSecret = vm.parseUint(vm.parseJsonString(json, ".note0.noteSecret"));
         fixture.note0OriginTag = vm.parseUint(vm.parseJsonString(json, ".note0.originTag"));
         fixture.note1Amount = vm.parseUint(vm.parseJsonString(json, ".note1.amount"));
-        fixture.note1Randomness = vm.parseUint(vm.parseJsonString(json, ".note1.randomness"));
+        fixture.note1NoteSecret = vm.parseUint(vm.parseJsonString(json, ".note1.noteSecret"));
         fixture.note1OriginTag = vm.parseUint(vm.parseJsonString(json, ".note1.originTag"));
     }
 
@@ -497,13 +497,13 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         vm.serializeAddress(objectKey, "depositorAddress", ALICE);
         vm.serializeUint(objectKey, "amount", DEPOSIT_AMOUNT);
         vm.serializeUint(objectKey, "tokenAddress", 0);
-        vm.serializeUint(objectKey, "nullifierKey", NK);
-        vm.serializeUint(objectKey, "outputSecret", OS);
+        vm.serializeUint(objectKey, "ownerNullifierKey", NK);
+        vm.serializeUint(objectKey, "noteSecretSeed", OS);
         vm.serializeUint(objectKey, "policyVersion", policyVersion);
         vm.serializeUint(objectKey, "nonce", 42);
         vm.serializeUint(objectKey, "validUntilSeconds", block.timestamp + 3600);
         vm.serializeUint(objectKey, "executionChainId", block.chainid);
-        vm.serializeUint(objectKey, "commitmentRoot", commitRoot);
+        vm.serializeUint(objectKey, "noteCommitmentRoot", commitRoot);
         vm.serializeUint(objectKey, "userRegistryRoot", userRegRoot);
         vm.serializeUint(objectKey, "authPolicyRoot", authPolicyRoot);
         vm.serializeString(objectKey, "userSiblings", _registrySiblingStrings(_userRegistrySiblings(ALICE)));
@@ -528,13 +528,13 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         vm.serializeAddress(objectKey, "depositorAddress", ALICE);
         vm.serializeUint(objectKey, "amount", DEPOSIT_AMOUNT);
         vm.serializeUint(objectKey, "tokenAddress", 0);
-        vm.serializeUint(objectKey, "nullifierKey", NK);
-        vm.serializeUint(objectKey, "outputSecret", OS);
+        vm.serializeUint(objectKey, "ownerNullifierKey", NK);
+        vm.serializeUint(objectKey, "noteSecretSeed", OS);
         vm.serializeUint(objectKey, "policyVersion", policyVersion);
         vm.serializeUint(objectKey, "nonce", 45);
         vm.serializeUint(objectKey, "validUntilSeconds", block.timestamp + 3600);
         vm.serializeUint(objectKey, "executionChainId", block.chainid);
-        vm.serializeUint(objectKey, "commitmentRoot", commitRoot);
+        vm.serializeUint(objectKey, "noteCommitmentRoot", commitRoot);
         vm.serializeUint(objectKey, "userRegistryRoot", userRegRoot);
         vm.serializeUint(objectKey, "authPolicyRoot", authPolicyRoot);
         vm.serializeString(objectKey, "userSiblings", _registrySiblingStrings(_userRegistrySiblings(ALICE)));
@@ -578,21 +578,21 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         vm.serializeAddress(objectKey, "recipientAddress", request.recipient);
         vm.serializeUint(objectKey, "amount", request.transferAmount);
         vm.serializeUint(objectKey, "tokenAddress", 0);
-        vm.serializeUint(objectKey, "nullifierKey", NK);
-        vm.serializeUint(objectKey, "outputSecret", OS);
+        vm.serializeUint(objectKey, "ownerNullifierKey", NK);
+        vm.serializeUint(objectKey, "noteSecretSeed", OS);
         vm.serializeUint(objectKey, "policyVersion", request.policyVersion);
         vm.serializeUint(objectKey, "nonce", 44);
         vm.serializeUint(objectKey, "validUntilSeconds", block.timestamp + 3600);
         vm.serializeUint(objectKey, "executionChainId", block.chainid);
-        vm.serializeUint(objectKey, "commitmentRoot", request.commitRoot);
+        vm.serializeUint(objectKey, "noteCommitmentRoot", request.commitRoot);
         vm.serializeUint(objectKey, "userRegistryRoot", request.userRegRoot);
         vm.serializeUint(objectKey, "authPolicyRoot", request.authPolicyRoot);
         vm.serializeUint(objectKey, "inputLeafIndex", request.inputLeafIndex);
         vm.serializeUint(objectKey, "inputAmount", request.inputAmount);
-        vm.serializeUint(objectKey, "inputRandomness", request.inputRandomness);
+        vm.serializeUint(objectKey, "inputNoteSecret", request.inputNoteSecret);
         vm.serializeUint(objectKey, "inputOriginTag", request.inputOriginTag);
-        vm.serializeUint(objectKey, "recipientNkHash", request.recipientNkHash);
-        vm.serializeUint(objectKey, "recipientOsHash", request.recipientOsHash);
+        vm.serializeUint(objectKey, "recipientOwnerNullifierKeyHash", request.recipientOwnerNullifierKeyHash);
+        vm.serializeUint(objectKey, "recipientNoteSecretSeedHash", request.recipientNoteSecretSeedHash);
         vm.serializeUint(objectKey, "changeAmount", request.changeAmount);
         vm.serializeString(objectKey, "inputSiblings", _siblingStrings(request.inputSiblings));
         vm.serializeString(objectKey, "userSiblings", _registrySiblingStrings(request.userSiblings));
@@ -625,18 +625,18 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         vm.serializeAddress(objectKey, "recipientAddress", request.publicRecipient);
         vm.serializeUint(objectKey, "amount", request.withdrawAmount);
         vm.serializeUint(objectKey, "tokenAddress", 0);
-        vm.serializeUint(objectKey, "nullifierKey", actor.nullifierKey);
-        vm.serializeUint(objectKey, "outputSecret", actor.outputSecret);
+        vm.serializeUint(objectKey, "ownerNullifierKey", actor.ownerNullifierKey);
+        vm.serializeUint(objectKey, "noteSecretSeed", actor.noteSecretSeed);
         vm.serializeUint(objectKey, "policyVersion", request.policyVersion);
         vm.serializeUint(objectKey, "nonce", 43);
         vm.serializeUint(objectKey, "validUntilSeconds", block.timestamp + 3600);
         vm.serializeUint(objectKey, "executionChainId", block.chainid);
-        vm.serializeUint(objectKey, "commitmentRoot", request.commitRoot);
+        vm.serializeUint(objectKey, "noteCommitmentRoot", request.commitRoot);
         vm.serializeUint(objectKey, "userRegistryRoot", request.userRegRoot);
         vm.serializeUint(objectKey, "authPolicyRoot", request.authPolicyRoot);
         vm.serializeUint(objectKey, "inputLeafIndex", request.inputLeafIndex);
         vm.serializeUint(objectKey, "inputAmount", request.inputAmount);
-        vm.serializeUint(objectKey, "inputRandomness", request.inputRandomness);
+        vm.serializeUint(objectKey, "inputNoteSecret", request.inputNoteSecret);
         vm.serializeUint(objectKey, "inputOriginTag", request.inputOriginTag);
         vm.serializeUint(objectKey, "changeAmount", request.inputAmount - request.withdrawAmount);
         vm.serializeString(objectKey, "inputSiblings", _siblingStrings(request.inputSiblings));
@@ -660,21 +660,21 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         vm.serializeAddress(objectKey, "recipientAddress", request.recipient);
         vm.serializeUint(objectKey, "amount", request.transferAmount);
         vm.serializeUint(objectKey, "tokenAddress", 0);
-        vm.serializeUint(objectKey, "nullifierKey", NK);
-        vm.serializeUint(objectKey, "outputSecret", OS);
+        vm.serializeUint(objectKey, "ownerNullifierKey", NK);
+        vm.serializeUint(objectKey, "noteSecretSeed", OS);
         vm.serializeUint(objectKey, "policyVersion", request.policyVersion);
         vm.serializeUint(objectKey, "nonce", 45);
         vm.serializeUint(objectKey, "validUntilSeconds", block.timestamp + 3600);
         vm.serializeUint(objectKey, "executionChainId", block.chainid);
-        vm.serializeUint(objectKey, "commitmentRoot", request.commitRoot);
+        vm.serializeUint(objectKey, "noteCommitmentRoot", request.commitRoot);
         vm.serializeUint(objectKey, "userRegistryRoot", request.userRegRoot);
         vm.serializeUint(objectKey, "authPolicyRoot", request.authPolicyRoot);
         vm.serializeUint(objectKey, "inputLeafIndex", request.inputLeafIndex);
         vm.serializeUint(objectKey, "inputAmount", request.inputAmount);
-        vm.serializeUint(objectKey, "inputRandomness", request.inputRandomness);
+        vm.serializeUint(objectKey, "inputNoteSecret", request.inputNoteSecret);
         vm.serializeUint(objectKey, "inputOriginTag", request.inputOriginTag);
-        vm.serializeUint(objectKey, "recipientNkHash", request.recipientNkHash);
-        vm.serializeUint(objectKey, "recipientOsHash", request.recipientOsHash);
+        vm.serializeUint(objectKey, "recipientOwnerNullifierKeyHash", request.recipientOwnerNullifierKeyHash);
+        vm.serializeUint(objectKey, "recipientNoteSecretSeedHash", request.recipientNoteSecretSeedHash);
         vm.serializeUint(objectKey, "changeAmount", request.changeAmount);
         vm.serializeString(objectKey, "inputSiblings", _siblingStrings(request.inputSiblings));
         vm.serializeString(objectKey, "userSiblings", _registrySiblingStrings(request.userSiblings));
@@ -702,18 +702,18 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         vm.serializeAddress(objectKey, "recipientAddress", request.publicRecipient);
         vm.serializeUint(objectKey, "amount", request.withdrawAmount);
         vm.serializeUint(objectKey, "tokenAddress", 0);
-        vm.serializeUint(objectKey, "nullifierKey", NK);
-        vm.serializeUint(objectKey, "outputSecret", OS);
+        vm.serializeUint(objectKey, "ownerNullifierKey", NK);
+        vm.serializeUint(objectKey, "noteSecretSeed", OS);
         vm.serializeUint(objectKey, "policyVersion", request.policyVersion);
         vm.serializeUint(objectKey, "nonce", 46);
         vm.serializeUint(objectKey, "validUntilSeconds", block.timestamp + 3600);
         vm.serializeUint(objectKey, "executionChainId", block.chainid);
-        vm.serializeUint(objectKey, "commitmentRoot", request.commitRoot);
+        vm.serializeUint(objectKey, "noteCommitmentRoot", request.commitRoot);
         vm.serializeUint(objectKey, "userRegistryRoot", request.userRegRoot);
         vm.serializeUint(objectKey, "authPolicyRoot", request.authPolicyRoot);
         vm.serializeUint(objectKey, "inputLeafIndex", request.inputLeafIndex);
         vm.serializeUint(objectKey, "inputAmount", request.inputAmount);
-        vm.serializeUint(objectKey, "inputRandomness", request.inputRandomness);
+        vm.serializeUint(objectKey, "inputNoteSecret", request.inputNoteSecret);
         vm.serializeUint(objectKey, "inputOriginTag", request.inputOriginTag);
         vm.serializeUint(objectKey, "changeAmount", request.inputAmount - request.withdrawAmount);
         vm.serializeString(objectKey, "inputSiblings", _siblingStrings(request.inputSiblings));
@@ -882,18 +882,18 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
     }
 
     function _publicInputsFromArray(bytes32[] memory pis) internal pure returns (ShieldedPool.PublicInputs memory pi) {
-        pi.merkleRoot = uint256(pis[0]);
+        pi.noteCommitmentRoot = uint256(pis[0]);
         pi.nullifier0 = uint256(pis[1]);
         pi.nullifier1 = uint256(pis[2]);
-        pi.commitment0 = uint256(pis[3]);
-        pi.commitment1 = uint256(pis[4]);
-        pi.commitment2 = uint256(pis[5]);
+        pi.noteCommitment0 = uint256(pis[3]);
+        pi.noteCommitment1 = uint256(pis[4]);
+        pi.noteCommitment2 = uint256(pis[5]);
         pi.publicAmountIn = uint256(pis[6]);
         pi.publicAmountOut = uint256(pis[7]);
         pi.publicRecipientAddress = uint256(pis[8]);
         pi.publicTokenAddress = uint256(pis[9]);
         pi.depositorAddress = uint256(pis[10]);
-        pi.intentNullifier = uint256(pis[11]);
+        pi.transactionReplayId = uint256(pis[11]);
         pi.registryRoot = uint256(pis[12]);
         pi.validUntilSeconds = uint256(pis[13]);
         pi.executionChainId = uint256(pis[14]);
@@ -910,16 +910,16 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         user = _deriveTestUser(NK, OS, DS, ALICE_SIGNING_PRIVATE_KEY);
         policyVersion = _registerAlice(user);
         fixture = _generateDepositFixture(
-            user, policyVersion, _currentCommitmentRoot(), _currentUserRegistryRoot(), _currentAuthPolicyRoot()
+            user, policyVersion, _currentNoteCommitmentRoot(), _currentUserRegistryRoot(), _currentAuthPolicyRoot()
         );
         _assertAndExecuteDepositFixture(fixture);
     }
 
     function _depositLeaves(ProofFixture memory fixture) internal pure returns (uint256[] memory leaves) {
         leaves = new uint256[](3);
-        leaves[0] = fixture.pubInputs.commitment0;
-        leaves[1] = fixture.pubInputs.commitment1;
-        leaves[2] = fixture.pubInputs.commitment2;
+        leaves[0] = fixture.pubInputs.noteCommitment0;
+        leaves[1] = fixture.pubInputs.noteCommitment1;
+        leaves[2] = fixture.pubInputs.noteCommitment2;
     }
 
     function _combinedLeaves(ProofFixture memory first, ProofFixture memory second)
@@ -928,12 +928,12 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         returns (uint256[] memory leaves)
     {
         leaves = new uint256[](6);
-        leaves[0] = first.pubInputs.commitment0;
-        leaves[1] = first.pubInputs.commitment1;
-        leaves[2] = first.pubInputs.commitment2;
-        leaves[3] = second.pubInputs.commitment0;
-        leaves[4] = second.pubInputs.commitment1;
-        leaves[5] = second.pubInputs.commitment2;
+        leaves[0] = first.pubInputs.noteCommitment0;
+        leaves[1] = first.pubInputs.noteCommitment1;
+        leaves[2] = first.pubInputs.noteCommitment2;
+        leaves[3] = second.pubInputs.noteCommitment0;
+        leaves[4] = second.pubInputs.noteCommitment1;
+        leaves[5] = second.pubInputs.noteCommitment2;
     }
 
     function _prepareBob(address bob) internal returns (PreparedUser memory bobUser) {
@@ -943,7 +943,7 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
 
     function _recoverSingleChainNote(
         address owner,
-        uint256 nullifierKey,
+        uint256 ownerNullifierKey,
         uint256 deliverySecret,
         uint256 leafIndex,
         bytes memory encryptedData,
@@ -953,8 +953,8 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
             abi.encodePacked(
                 '{"ownerAddress":"',
                 vm.toString(uint256(uint160(owner))),
-                '","nullifierKey":"',
-                vm.toString(nullifierKey),
+                '","ownerNullifierKey":"',
+                vm.toString(ownerNullifierKey),
                 '","deliverySecret":"',
                 vm.toString(deliverySecret),
                 '","leafIndex":"',
@@ -977,15 +977,15 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         note.leafIndex = vm.parseJsonUint(json, ".note.leafIndex");
         note.amount = vm.parseUint(vm.parseJsonString(json, ".note.amount"));
         note.ownerAddress = vm.parseUint(vm.parseJsonString(json, ".note.ownerAddress"));
-        note.randomness = vm.parseUint(vm.parseJsonString(json, ".note.randomness"));
-        note.nullifierKeyHash = vm.parseUint(vm.parseJsonString(json, ".note.nullifierKeyHash"));
+        note.noteSecret = vm.parseUint(vm.parseJsonString(json, ".note.noteSecret"));
+        note.ownerNullifierKeyHash = vm.parseUint(vm.parseJsonString(json, ".note.ownerNullifierKeyHash"));
         note.tokenAddress = vm.parseUint(vm.parseJsonString(json, ".note.tokenAddress"));
         note.originTag = vm.parseUint(vm.parseJsonString(json, ".note.originTag"));
     }
 
     function _recoverFirstUnspentNoteFromHistory(
         address owner,
-        uint256 nullifierKey,
+        uint256 ownerNullifierKey,
         uint256 deliverySecret,
         SyncedTransactFixture[] memory history
     ) internal returns (RecoveredNote memory note) {
@@ -1003,12 +1003,12 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
                 vm.toString(fixture.pubInputs.nullifier0),
                 '","nullifier1":"',
                 vm.toString(fixture.pubInputs.nullifier1),
-                '","commitment0":"',
-                vm.toString(fixture.pubInputs.commitment0),
-                '","commitment1":"',
-                vm.toString(fixture.pubInputs.commitment1),
-                '","commitment2":"',
-                vm.toString(fixture.pubInputs.commitment2),
+                '","noteCommitment0":"',
+                vm.toString(fixture.pubInputs.noteCommitment0),
+                '","noteCommitment1":"',
+                vm.toString(fixture.pubInputs.noteCommitment1),
+                '","noteCommitment2":"',
+                vm.toString(fixture.pubInputs.noteCommitment2),
                 '","outputNoteData0":"',
                 vm.toString(fixture.noteData0),
                 '","outputNoteData1":"',
@@ -1024,8 +1024,8 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
             abi.encodePacked(
                 '{"ownerAddress":"',
                 vm.toString(uint256(uint160(owner))),
-                '","nullifierKey":"',
-                vm.toString(nullifierKey),
+                '","ownerNullifierKey":"',
+                vm.toString(ownerNullifierKey),
                 '","deliverySecret":"',
                 vm.toString(deliverySecret),
                 '","leafIndex":"0","encryptedData":"0x","commitment":"0","transacts":',
@@ -1044,13 +1044,13 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
         note.leafIndex = vm.parseJsonUint(json, ".note.leafIndex");
         note.amount = vm.parseUint(vm.parseJsonString(json, ".note.amount"));
         note.ownerAddress = vm.parseUint(vm.parseJsonString(json, ".note.ownerAddress"));
-        note.randomness = vm.parseUint(vm.parseJsonString(json, ".note.randomness"));
-        note.nullifierKeyHash = vm.parseUint(vm.parseJsonString(json, ".note.nullifierKeyHash"));
+        note.noteSecret = vm.parseUint(vm.parseJsonString(json, ".note.noteSecret"));
+        note.ownerNullifierKeyHash = vm.parseUint(vm.parseJsonString(json, ".note.ownerNullifierKeyHash"));
         note.tokenAddress = vm.parseUint(vm.parseJsonString(json, ".note.tokenAddress"));
         note.originTag = vm.parseUint(vm.parseJsonString(json, ".note.originTag"));
     }
 
-    function _currentCommitmentRoot() internal view returns (uint256 root) {
+    function _currentNoteCommitmentRoot() internal view returns (uint256 root) {
         (root,,) = pool.getCurrentRoots();
     }
 
@@ -1073,8 +1073,8 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
     function _aliceSecrets() internal pure returns (UserSecrets memory actor) {
         actor = UserSecrets({
             account: ALICE,
-            nullifierKey: NK,
-            outputSecret: OS,
+            ownerNullifierKey: NK,
+            noteSecretSeed: OS,
             deliverySecret: DS,
             signingPrivateKey: ALICE_SIGNING_PRIVATE_KEY
         });
@@ -1083,8 +1083,8 @@ abstract contract ShieldedPoolE2EBase is Test, InstallSystemTestBase {
     function _bobSecrets(address bob) internal pure returns (UserSecrets memory actor) {
         actor = UserSecrets({
             account: bob,
-            nullifierKey: BOB_NK,
-            outputSecret: BOB_OS,
+            ownerNullifierKey: BOB_NK,
+            noteSecretSeed: BOB_OS,
             deliverySecret: BOB_DS,
             signingPrivateKey: BOB_SIGNING_PRIVATE_KEY
         });

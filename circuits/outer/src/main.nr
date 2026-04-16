@@ -13,22 +13,22 @@ use privacy_pool_common::constants::{
     WITHDRAWAL_OP,
 };
 use privacy_pool_common::digest::{
-    intent_digest,
-    intent_nullifier,
     output_binding,
+    transaction_intent_digest as common_transaction_intent_digest,
+    transaction_replay_id as common_transaction_replay_id,
 };
 use privacy_pool_common::hash_utils::hash_vk;
 use privacy_pool_common::note::{
     assert_origin_mode_constraints,
     deposit_origin_tag,
-    dummy_nullifier_key_hash,
+    dummy_owner_nullifier_key_hash,
+    note_nullifier,
     origin_tag_for_spend,
     note_commitment,
-    nullifier_key_hash,
-    output_randomness,
-    output_secret_hash,
+    note_secret,
+    note_secret_seed_hash,
+    owner_nullifier_key_hash,
     phantom_nullifier,
-    real_nullifier,
 };
 use privacy_pool_common::range::{
     assert_address,
@@ -37,30 +37,30 @@ use privacy_pool_common::range::{
     assert_origin_mode,
     assert_valid_until,
 };
-use privacy_pool_common::registry::{auth_membership_root, minimal_user_membership_root};
+use privacy_pool_common::registry::{auth_membership_root, user_registry_membership_root};
 use privacy_pool_common::types::{
     AuthPolicyLeaf,
     AuthPolicyWitness,
     InputNoteWitness,
-    MinimalUserRegistryLeaf,
     Note,
+    UserRegistryLeaf,
     UserRegistryWitness,
 };
 
 fn main(
     // --- 19 public inputs ---
-    merkle_root: pub Field,
+    note_commitment_root: pub Field,
     nullifier0_out: pub Field,
     nullifier1_out: pub Field,
-    commitment0_out: pub Field,
-    commitment1_out: pub Field,
-    commitment2_out: pub Field,
+    note_commitment0_out: pub Field,
+    note_commitment1_out: pub Field,
+    note_commitment2_out: pub Field,
     public_amount_in: pub Field,
     public_amount_out: pub Field,
     public_recipient: pub Field,
     public_token_address: pub Field,
     depositor_address: pub Field,
-    intent_nullifier_out: pub Field,
+    transaction_replay_id: pub Field,
     registry_root: pub Field,
     valid_until_seconds: pub Field,
     execution_chain_id: pub Field,
@@ -75,7 +75,7 @@ fn main(
     inner_bb_key_hash: Field,
     authorizing_address: Field,
     auth_data_commitment: Field,
-    intent_digest_out: Field,
+    transaction_intent_digest: Field,
 
     // --- outer auth witnesses ---
     policy_version: Field,
@@ -86,16 +86,16 @@ fn main(
     locked_output_binding0: Field,
     locked_output_binding1: Field,
     locked_output_binding2: Field,
-    nullifier_key: Field,
-    output_secret: Field,
+    owner_nullifier_key: Field,
+    note_secret_seed: Field,
 
-    sender_leaf: MinimalUserRegistryLeaf,
+    sender_leaf: UserRegistryLeaf,
     sender_witness: UserRegistryWitness,
 
-    recipient_leaf: MinimalUserRegistryLeaf,
+    recipient_leaf: UserRegistryLeaf,
     recipient_witness: UserRegistryWitness,
 
-    sponsor_leaf: MinimalUserRegistryLeaf,
+    sponsor_leaf: UserRegistryLeaf,
     sponsor_witness: UserRegistryWitness,
 
     auth_witness: AuthPolicyWitness,
@@ -166,7 +166,7 @@ fn main(
     // == Inner proof verification (all modes) ==
     let inner_public_inputs = [
         auth_data_commitment,
-        intent_digest_out,
+        transaction_intent_digest,
     ];
     verify_honk_proof(inner_vk, inner_proof, inner_public_inputs, inner_bb_key_hash);
 
@@ -178,12 +178,12 @@ fn main(
     assert(auth_root == auth_policy_registry_root, "auth policy root mismatch");
 
     // == Sender/depositor registry binding (all modes) ==
-    let sender_root = minimal_user_membership_root(authorizing_address, sender_leaf, sender_witness);
+    let sender_root = user_registry_membership_root(authorizing_address, sender_leaf, sender_witness);
     assert(sender_root == registry_root, "sender root mismatch");
 
-    let expected_nk_hash = nullifier_key_hash(nullifier_key);
-    assert(sender_leaf.nullifier_key_hash == expected_nk_hash);
-    assert(sender_leaf.output_secret_hash == output_secret_hash(output_secret));
+    let expected_owner_nullifier_key_hash = owner_nullifier_key_hash(owner_nullifier_key);
+    assert(sender_leaf.owner_nullifier_key_hash == expected_owner_nullifier_key_hash);
+    assert(sender_leaf.note_secret_seed_hash == note_secret_seed_hash(note_secret_seed));
 
     // == Determine token, recipient, amount based on mode ==
     let token_address = if is_deposit {
@@ -218,8 +218,8 @@ fn main(
         WITHDRAWAL_OP
     };
 
-    // == Intent digest + verification (all modes) ==
-    let intent_digest_value = intent_digest(
+    // == Transaction intent digest + verification (all modes) ==
+    let transaction_intent_digest_value = common_transaction_intent_digest(
         policy_version,
         authorizing_address,
         operation_kind,
@@ -238,18 +238,18 @@ fn main(
         execution_chain_id,
     );
 
-    // == Intent nullifier (all modes) ==
-    let intent_nullifier_value = intent_nullifier(
-        nullifier_key,
+    // == Transaction replay id (all modes) ==
+    let transaction_replay_id_value = common_transaction_replay_id(
+        owner_nullifier_key,
         authorizing_address,
         execution_chain_id,
         nonce,
     );
-    assert(intent_nullifier_value == intent_nullifier_out);
+    assert(transaction_replay_id_value == transaction_replay_id);
 
     // == Recipient registry proof (deposit + transfer only) ==
     if is_deposit | is_transfer {
-        let recipient_root = minimal_user_membership_root(recipient_address, recipient_leaf, recipient_witness);
+        let recipient_root = user_registry_membership_root(recipient_address, recipient_leaf, recipient_witness);
         assert(recipient_root == registry_root);
     }
 
@@ -265,7 +265,7 @@ fn main(
             assert_address(fee_note_owner);
         }
         // Fee note recipient registry proof
-        let sponsor_root = minimal_user_membership_root(fee_note_owner, sponsor_leaf, sponsor_witness);
+        let sponsor_root = user_registry_membership_root(fee_note_owner, sponsor_leaf, sponsor_witness);
         assert(sponsor_root == registry_root);
     } else {
         assert(fee_recipient_address == 0);
@@ -281,40 +281,40 @@ fn main(
 
     let nullifier0 = if input0.is_phantom {
         assert(input0.note.amount == 0);
-        phantom_nullifier(nullifier_key, intent_nullifier_value, 0)
+        phantom_nullifier(owner_nullifier_key, transaction_replay_id_value, 0)
     } else {
         assert_amount(input0.note.amount);
         assert(input0.note.owner_address == authorizing_address);
-        assert(input0.note.nullifier_key_hash == sender_leaf.nullifier_key_hash);
+        assert(input0.note.owner_nullifier_key_hash == sender_leaf.owner_nullifier_key_hash);
         assert(input0.note.token_address == token_address);
         let leaf0 = note_commitment(input0.note);
         let root0 = privacy_pool_common::merkle::merkle_root_from_index(leaf0, input0.leaf_index, input0.siblings);
-        assert(root0 == merkle_root);
-        real_nullifier(nullifier_key, input0.note.randomness)
+        assert(root0 == note_commitment_root);
+        note_nullifier(owner_nullifier_key, input0.note.note_secret)
     };
 
     let nullifier1 = if input1.is_phantom {
         assert(input1.note.amount == 0);
-        phantom_nullifier(nullifier_key, intent_nullifier_value, 1)
+        phantom_nullifier(owner_nullifier_key, transaction_replay_id_value, 1)
     } else {
         assert_amount(input1.note.amount);
         assert(input1.note.owner_address == authorizing_address);
-        assert(input1.note.nullifier_key_hash == sender_leaf.nullifier_key_hash);
+        assert(input1.note.owner_nullifier_key_hash == sender_leaf.owner_nullifier_key_hash);
         assert(input1.note.token_address == token_address);
         let leaf1 = note_commitment(input1.note);
         let root1 = privacy_pool_common::merkle::merkle_root_from_index(leaf1, input1.leaf_index, input1.siblings);
-        assert(root1 == merkle_root);
-        real_nullifier(nullifier_key, input1.note.randomness)
+        assert(root1 == note_commitment_root);
+        note_nullifier(owner_nullifier_key, input1.note.note_secret)
     };
 
     assert(nullifier0 == nullifier0_out);
     assert(nullifier1 == nullifier1_out);
     assert(nullifier0 != nullifier1);
 
-    // == Output randomness (all modes, from outputSecret) ==
-    let out0_randomness = output_randomness(output_secret, intent_nullifier_value, 0);
-    let out1_randomness = output_randomness(output_secret, intent_nullifier_value, 1);
-    let out2_randomness = output_randomness(output_secret, intent_nullifier_value, 2);
+    // == Note secrets (all modes, from noteSecretSeed) ==
+    let out0_note_secret = note_secret(note_secret_seed, transaction_replay_id_value, 0);
+    let out1_note_secret = note_secret(note_secret_seed, transaction_replay_id_value, 1);
+    let out2_note_secret = note_secret(note_secret_seed, transaction_replay_id_value, 2);
 
     // == Origin tag derivation ==
     let propagated_origin_tag = if is_deposit {
@@ -332,7 +332,7 @@ fn main(
         depositor_address,
         token_address,
         public_amount_in,
-        intent_nullifier_value,
+        transaction_replay_id_value,
     );
     let origin_tag = if is_deposit {
         if origin_mode == 0 { 0 } else { deposit_origin_tag_value }
@@ -359,8 +359,8 @@ fn main(
         Note {
             amount: authorized_amount,
             owner_address: recipient_address,
-            randomness: out0_randomness,
-            nullifier_key_hash: recipient_leaf.nullifier_key_hash,
+            note_secret: out0_note_secret,
+            owner_nullifier_key_hash: recipient_leaf.owner_nullifier_key_hash,
             token_address,
             origin_tag,
         }
@@ -369,8 +369,8 @@ fn main(
         Note {
             amount: payment_amount,
             owner_address: recipient_address,
-            randomness: out0_randomness,
-            nullifier_key_hash: recipient_leaf.nullifier_key_hash,
+            note_secret: out0_note_secret,
+            owner_nullifier_key_hash: recipient_leaf.owner_nullifier_key_hash,
             token_address,
             origin_tag,
         }
@@ -378,8 +378,8 @@ fn main(
         Note {
             amount: 0,
             owner_address: 0,
-            randomness: out0_randomness,
-            nullifier_key_hash: dummy_nullifier_key_hash(),
+            note_secret: out0_note_secret,
+            owner_nullifier_key_hash: dummy_owner_nullifier_key_hash(),
             token_address: 0,
             origin_tag: 0,
         }
@@ -388,8 +388,8 @@ fn main(
         Note {
             amount: change_amount,
             owner_address: authorizing_address,
-            randomness: out0_randomness,
-            nullifier_key_hash: sender_leaf.nullifier_key_hash,
+            note_secret: out0_note_secret,
+            owner_nullifier_key_hash: sender_leaf.owner_nullifier_key_hash,
             token_address,
             origin_tag,
         }
@@ -408,8 +408,8 @@ fn main(
         Note {
             amount: 0,
             owner_address: 0,
-            randomness: out1_randomness,
-            nullifier_key_hash: dummy_nullifier_key_hash(),
+            note_secret: out1_note_secret,
+            owner_nullifier_key_hash: dummy_owner_nullifier_key_hash(),
             token_address: 0,
             origin_tag: 0,
         }
@@ -418,8 +418,8 @@ fn main(
         Note {
             amount: change_amount,
             owner_address: authorizing_address,
-            randomness: out1_randomness,
-            nullifier_key_hash: sender_leaf.nullifier_key_hash,
+            note_secret: out1_note_secret,
+            owner_nullifier_key_hash: sender_leaf.owner_nullifier_key_hash,
             token_address,
             origin_tag,
         }
@@ -432,8 +432,8 @@ fn main(
         Note {
             amount: 0,
             owner_address: 0,
-            randomness: out2_randomness,
-            nullifier_key_hash: dummy_nullifier_key_hash(),
+            note_secret: out2_note_secret,
+            owner_nullifier_key_hash: dummy_owner_nullifier_key_hash(),
             token_address: 0,
             origin_tag: 0,
         }
@@ -441,8 +441,8 @@ fn main(
         Note {
             amount: fee_amount,
             owner_address: fee_note_owner,
-            randomness: out2_randomness,
-            nullifier_key_hash: sponsor_leaf.nullifier_key_hash,
+            note_secret: out2_note_secret,
+            owner_nullifier_key_hash: sponsor_leaf.owner_nullifier_key_hash,
             token_address,
             origin_tag,
         }
@@ -477,16 +477,16 @@ fn main(
     }
 
     // == Commitment binding ==
-    let commitment0 = note_commitment(out0);
-    let commitment1 = note_commitment(out1);
-    let commitment2 = note_commitment(out2);
-    assert(commitment0 == commitment0_out);
-    assert(commitment1 == commitment1_out);
-    assert(commitment2 == commitment2_out);
+    let note_commitment0 = note_commitment(out0);
+    let note_commitment1 = note_commitment(out1);
+    let note_commitment2 = note_commitment(out2);
+    assert(note_commitment0 == note_commitment0_out);
+    assert(note_commitment1 == note_commitment1_out);
+    assert(note_commitment2 == note_commitment2_out);
 
-    let output_binding0 = output_binding(commitment0, output_note_data_hash0);
-    let output_binding1 = output_binding(commitment1, output_note_data_hash1);
-    let output_binding2 = output_binding(commitment2, output_note_data_hash2);
+    let output_binding0 = output_binding(note_commitment0, output_note_data_hash0);
+    let output_binding1 = output_binding(note_commitment1, output_note_data_hash1);
+    let output_binding2 = output_binding(note_commitment2, output_note_data_hash2);
 
     assert_output_binding_lock(
         execution_constraints_flags,
@@ -507,7 +507,7 @@ fn main(
         output_binding2,
     );
 
-    assert(intent_digest_value == intent_digest_out, "intent digest mismatch");
+    assert(transaction_intent_digest_value == transaction_intent_digest, "transaction intent digest mismatch");
 }
 
 fn assert_output_binding_lock(

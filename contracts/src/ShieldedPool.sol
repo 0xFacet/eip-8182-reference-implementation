@@ -6,12 +6,12 @@ import {PoseidonFieldLib} from "./libraries/PoseidonFieldLib.sol";
 
 contract ShieldedPool {
     uint256 internal constant MAX_INTENT_LIFETIME = 86400;
-    uint256 internal constant COMMITMENT_ROOT_HISTORY_SIZE = 500;
+    uint256 internal constant NOTE_COMMITMENT_ROOT_HISTORY_SIZE = 500;
     uint256 internal constant USER_REGISTRY_ROOT_HISTORY_BLOCKS = 500;
     uint256 internal constant AUTH_POLICY_ROOT_HISTORY_BLOCKS = 64;
     uint256 internal constant COMMITMENT_TREE_DEPTH = 32;
     uint256 internal constant REGISTRY_TREE_DEPTH = 160;
-    uint256 internal constant MAX_COMMITMENT_LEAF_INDEX = type(uint32).max;
+    uint256 internal constant MAX_NOTE_COMMITMENT_LEAF_INDEX = type(uint32).max;
     uint256 internal constant MAX_ADDRESS_VALUE = type(uint160).max;
     uint256 internal constant MAX_AMOUNT_VALUE = type(uint248).max;
     uint256 internal constant MAX_VALID_UNTIL_SECONDS = type(uint32).max;
@@ -19,18 +19,18 @@ contract ShieldedPool {
     address internal constant PROOF_VERIFY_PRECOMPILE_ADDRESS = 0x0000000000000000000000000000000000000030;
 
     struct PublicInputs {
-        uint256 merkleRoot;
+        uint256 noteCommitmentRoot;
         uint256 nullifier0;
         uint256 nullifier1;
-        uint256 commitment0;
-        uint256 commitment1;
-        uint256 commitment2;
+        uint256 noteCommitment0;
+        uint256 noteCommitment1;
+        uint256 noteCommitment2;
         uint256 publicAmountIn;
         uint256 publicAmountOut;
         uint256 publicRecipientAddress;
         uint256 publicTokenAddress;
         uint256 depositorAddress;
-        uint256 intentNullifier;
+        uint256 transactionReplayId;
         uint256 registryRoot;
         uint256 validUntilSeconds;
         uint256 executionChainId;
@@ -47,8 +47,8 @@ contract ShieldedPool {
 
     struct UserRegistryEntry {
         bool registered;
-        uint256 nullifierKeyHash;
-        uint256 outputSecretHash;
+        uint256 ownerNullifierKeyHash;
+        uint256 noteSecretSeedHash;
     }
 
     struct AuthPolicyState {
@@ -83,7 +83,7 @@ contract ShieldedPool {
     error FieldElementNotCanonical();
     error IntentExpired();
     error IntentLifetimeTooLong();
-    error IntentNullifierAlreadyUsed();
+    error TransactionReplayIdAlreadyUsed();
     error InvalidOutputNoteDataHash(uint8 slot);
     error InvalidPublicActionConfiguration();
     error InvalidProof();
@@ -91,33 +91,33 @@ contract ShieldedPool {
     error ReentrantCall();
     error TreeFull();
     error UnexpectedEth();
-    error UnknownCommitmentRoot();
+    error UnknownNoteCommitmentRoot();
     error UnknownAuthPolicyRoot();
     error UnknownUserRegistryRoot();
     error UserAlreadyRegistered();
     error UserNotRegistered();
     error WrongChainId();
     error WrongDepositor();
-    error ZeroCommitment();
+    error ZeroNoteCommitment();
     error ZeroLeaf();
 
     event ShieldedPoolTransact(
         uint256 indexed nullifier0,
         uint256 indexed nullifier1,
-        uint256 indexed intentNullifier,
-        uint256 commitment0,
-        uint256 commitment1,
-        uint256 commitment2,
+        uint256 indexed transactionReplayId,
+        uint256 noteCommitment0,
+        uint256 noteCommitment1,
+        uint256 noteCommitment2,
         uint256 leafIndex0,
-        uint256 postInsertionRoot,
+        uint256 postInsertionCommitmentRoot,
         bytes outputNoteData0,
         bytes outputNoteData1,
         bytes outputNoteData2
     );
 
-    event UserRegistered(address indexed user, uint256 nullifierKeyHash, uint256 outputSecretHash);
+    event UserRegistered(address indexed user, uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHash);
 
-    event OutputSecretRotated(address indexed user, uint256 outputSecretHash);
+    event NoteSecretSeedRotated(address indexed user, uint256 noteSecretSeedHash);
 
     event AuthPolicyRegistered(
         address indexed user, uint256 innerVkHash, uint256 authDataCommitment, uint256 policyVersion
@@ -130,10 +130,10 @@ contract ShieldedPool {
     event DeliveryKeyRemoved(address indexed user, uint32 indexed schemeId);
 
     uint256 internal nextLeafIndex;
-    uint256 internal currentCommitmentRoot;
-    uint256 internal commitmentRootHistoryCount;
-    mapping(uint256 => uint256) private filledSubtrees;
-    mapping(uint256 => uint256) internal commitmentRootHistory;
+    uint256 internal currentNoteCommitmentRoot;
+    uint256 internal noteCommitmentRootHistoryCount;
+    mapping(uint256 => uint256) private filledNoteCommitmentSubtrees;
+    mapping(uint256 => uint256) internal noteCommitmentRootHistory;
 
     uint256 internal currentUserRegistryRoot;
     uint256 internal userRegistryLastSnapshotBlock;
@@ -152,8 +152,8 @@ contract ShieldedPool {
     mapping(bytes32 => uint256) private policyVersions;
 
     mapping(uint256 => bool) private nullifierSpent;
-    mapping(uint256 => bool) private intentNullifierUsed;
-    uint256[COMMITMENT_TREE_DEPTH] internal commitmentEmptyHashes;
+    mapping(uint256 => bool) private transactionReplayIdUsed;
+    uint256[COMMITMENT_TREE_DEPTH] internal noteCommitmentEmptyHashes;
     uint256[REGISTRY_TREE_DEPTH] internal sparseEmptyHashes;
 
     modifier nonReentrant() {
@@ -188,7 +188,7 @@ contract ShieldedPool {
         require(block.timestamp <= publicInputs.validUntilSeconds, IntentExpired());
         require(publicInputs.validUntilSeconds <= block.timestamp + MAX_INTENT_LIFETIME, IntentLifetimeTooLong());
 
-        require(isAcceptedCommitmentRoot(publicInputs.merkleRoot), UnknownCommitmentRoot());
+        require(isAcceptedNoteCommitmentRoot(publicInputs.noteCommitmentRoot), UnknownNoteCommitmentRoot());
         require(isAcceptedUserRegistryRoot(publicInputs.registryRoot), UnknownUserRegistryRoot());
         require(isAcceptedAuthPolicyRoot(publicInputs.authPolicyRegistryRoot), UnknownAuthPolicyRoot());
 
@@ -200,23 +200,23 @@ contract ShieldedPool {
         nullifierSpent[publicInputs.nullifier0] = true;
         nullifierSpent[publicInputs.nullifier1] = true;
 
-        require(!intentNullifierUsed[publicInputs.intentNullifier], IntentNullifierAlreadyUsed());
-        intentNullifierUsed[publicInputs.intentNullifier] = true;
+        require(!transactionReplayIdUsed[publicInputs.transactionReplayId], TransactionReplayIdAlreadyUsed());
+        transactionReplayIdUsed[publicInputs.transactionReplayId] = true;
 
         require(
-            publicInputs.commitment0 != 0 && publicInputs.commitment1 != 0 && publicInputs.commitment2 != 0,
-            ZeroCommitment()
+            publicInputs.noteCommitment0 != 0 && publicInputs.noteCommitment1 != 0 && publicInputs.noteCommitment2 != 0,
+            ZeroNoteCommitment()
         );
 
         uint256 leafIndex0 = nextLeafIndex;
-        require(leafIndex0 + 2 <= MAX_COMMITMENT_LEAF_INDEX, TreeFull());
+        require(leafIndex0 + 2 <= MAX_NOTE_COMMITMENT_LEAF_INDEX, TreeFull());
 
-        uint256 preInsertionRoot = _currentCommitmentRoot();
-        _pushCommitmentRoot(preInsertionRoot);
+        uint256 preInsertionNoteCommitmentRoot = _currentNoteCommitmentRoot();
+        _pushNoteCommitmentRoot(preInsertionNoteCommitmentRoot);
 
-        _insertCommitment(publicInputs.commitment0);
-        _insertCommitment(publicInputs.commitment1);
-        _insertCommitment(publicInputs.commitment2);
+        _insertNoteCommitment(publicInputs.noteCommitment0);
+        _insertNoteCommitment(publicInputs.noteCommitment1);
+        _insertNoteCommitment(publicInputs.noteCommitment2);
 
         _assertOutputNoteHash(outputNoteData0, publicInputs.outputNoteDataHash0, 0);
         _assertOutputNoteHash(outputNoteData1, publicInputs.outputNoteDataHash1, 1);
@@ -230,20 +230,20 @@ contract ShieldedPool {
     function getCurrentRoots()
         external
         view
-        returns (uint256 commitmentRoot, uint256 registryRoot, uint256 authPolicyRegistryRoot)
+        returns (uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRegistryRoot)
     {
-        commitmentRoot = _currentCommitmentRoot();
-        registryRoot = _currentUserRegistryRoot();
+        noteCommitmentRoot = _currentNoteCommitmentRoot();
+        userRegistryRoot = _currentUserRegistryRoot();
         authPolicyRegistryRoot = _currentAuthPolicyRoot();
     }
 
     function getUserRegistryEntry(address user)
         external
         view
-        returns (bool registered, uint256 nullifierKeyHash, uint256 outputSecretHash)
+        returns (bool registered, uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHash)
     {
         UserRegistryEntry storage entry = userRegistryEntries[user];
-        return (entry.registered, entry.nullifierKeyHash, entry.outputSecretHash);
+        return (entry.registered, entry.ownerNullifierKeyHash, entry.noteSecretSeedHash);
     }
 
     function getAuthPolicy(address user, uint256 innerVkHash)
@@ -261,36 +261,36 @@ contract ShieldedPool {
         return nullifierSpent[nullifier];
     }
 
-    function isIntentNullifierUsed(uint256 intentNullifier) external view returns (bool) {
-        return intentNullifierUsed[intentNullifier];
+    function isTransactionReplayIdUsed(uint256 transactionReplayId) external view returns (bool) {
+        return transactionReplayIdUsed[transactionReplayId];
     }
 
-    function registerUser(uint256 nullifierKeyHash, uint256 outputSecretHash) external {
-        _registerUser(msg.sender, nullifierKeyHash, outputSecretHash);
+    function registerUser(uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHash) external {
+        _registerUser(msg.sender, ownerNullifierKeyHash, noteSecretSeedHash);
     }
 
-    function registerUser(uint256 nullifierKeyHash, uint256 outputSecretHash, uint32 schemeId, bytes calldata keyBytes)
+    function registerUser(uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHash, uint32 schemeId, bytes calldata keyBytes)
         external
     {
-        _registerUser(msg.sender, nullifierKeyHash, outputSecretHash);
+        _registerUser(msg.sender, ownerNullifierKeyHash, noteSecretSeedHash);
         _setDeliveryKey(msg.sender, schemeId, keyBytes);
     }
 
-    function rotateOutputSecret(uint256 newOutputSecretHash) external {
-        _ensureCanonicalField(newOutputSecretHash);
+    function rotateNoteSecretSeed(uint256 newNoteSecretSeedHash) external {
+        _ensureCanonicalField(newNoteSecretSeedHash);
 
         UserRegistryEntry storage entry = userRegistryEntries[msg.sender];
         require(entry.registered, UserNotRegistered());
 
-        uint256 leaf = PoseidonFieldLib.userRegistryLeaf(msg.sender, entry.nullifierKeyHash, newOutputSecretHash);
+        uint256 leaf = PoseidonFieldLib.userRegistryLeaf(msg.sender, entry.ownerNullifierKeyHash, newNoteSecretSeedHash);
         require(leaf != 0, ZeroLeaf());
 
         _snapshotUserRegistryRoot();
         _writeUserTreeLeaf(uint256(uint160(msg.sender)), leaf);
 
-        entry.outputSecretHash = newOutputSecretHash;
+        entry.noteSecretSeedHash = newNoteSecretSeedHash;
 
-        emit OutputSecretRotated(msg.sender, newOutputSecretHash);
+        emit NoteSecretSeedRotated(msg.sender, newNoteSecretSeedHash);
     }
 
     function setDeliveryKey(uint32 schemeId, bytes calldata keyBytes) external {
@@ -354,24 +354,24 @@ contract ShieldedPool {
         emit AuthPolicyDeregistered(msg.sender, innerVkHash);
     }
 
-    function _registerUser(address user, uint256 nullifierKeyHash, uint256 outputSecretHash) private {
-        _ensureCanonicalField(nullifierKeyHash);
-        _ensureCanonicalField(outputSecretHash);
+    function _registerUser(address user, uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHash) private {
+        _ensureCanonicalField(ownerNullifierKeyHash);
+        _ensureCanonicalField(noteSecretSeedHash);
 
         UserRegistryEntry storage entry = userRegistryEntries[user];
         require(!entry.registered, UserAlreadyRegistered());
 
-        uint256 leaf = PoseidonFieldLib.userRegistryLeaf(user, nullifierKeyHash, outputSecretHash);
+        uint256 leaf = PoseidonFieldLib.userRegistryLeaf(user, ownerNullifierKeyHash, noteSecretSeedHash);
         require(leaf != 0, ZeroLeaf());
 
         _snapshotUserRegistryRoot();
         _writeUserTreeLeaf(uint256(uint160(user)), leaf);
 
         userRegistryEntries[user] = UserRegistryEntry({
-            registered: true, nullifierKeyHash: nullifierKeyHash, outputSecretHash: outputSecretHash
+            registered: true, ownerNullifierKeyHash: ownerNullifierKeyHash, noteSecretSeedHash: noteSecretSeedHash
         });
 
-        emit UserRegistered(user, nullifierKeyHash, outputSecretHash);
+        emit UserRegistered(user, ownerNullifierKeyHash, noteSecretSeedHash);
     }
 
     function _setDeliveryKey(address user, uint32 schemeId, bytes calldata keyBytes) private {
@@ -414,12 +414,12 @@ contract ShieldedPool {
         emit ShieldedPoolTransact(
             publicInputs.nullifier0,
             publicInputs.nullifier1,
-            publicInputs.intentNullifier,
-            publicInputs.commitment0,
-            publicInputs.commitment1,
-            publicInputs.commitment2,
+            publicInputs.transactionReplayId,
+            publicInputs.noteCommitment0,
+            publicInputs.noteCommitment1,
+            publicInputs.noteCommitment2,
             leafIndex0,
-            currentCommitmentRoot,
+            currentNoteCommitmentRoot,
             outputNoteData0,
             outputNoteData1,
             outputNoteData2
@@ -504,13 +504,13 @@ contract ShieldedPool {
     }
 
     function _ensureCanonicalProofFields(PublicInputs calldata publicInputs) private pure {
-        _ensureCanonicalField(publicInputs.merkleRoot);
+        _ensureCanonicalField(publicInputs.noteCommitmentRoot);
         _ensureCanonicalField(publicInputs.nullifier0);
         _ensureCanonicalField(publicInputs.nullifier1);
-        _ensureCanonicalField(publicInputs.commitment0);
-        _ensureCanonicalField(publicInputs.commitment1);
-        _ensureCanonicalField(publicInputs.commitment2);
-        _ensureCanonicalField(publicInputs.intentNullifier);
+        _ensureCanonicalField(publicInputs.noteCommitment0);
+        _ensureCanonicalField(publicInputs.noteCommitment1);
+        _ensureCanonicalField(publicInputs.noteCommitment2);
+        _ensureCanonicalField(publicInputs.transactionReplayId);
         _ensureCanonicalField(publicInputs.registryRoot);
         _ensureCanonicalField(publicInputs.authPolicyRegistryRoot);
         _ensureCanonicalField(publicInputs.outputNoteDataHash0);
@@ -522,8 +522,8 @@ contract ShieldedPool {
         require(value < PoseidonFieldLib.FIELD_MODULUS, FieldElementNotCanonical());
     }
 
-    function _currentCommitmentRoot() private view returns (uint256) {
-        return currentCommitmentRoot;
+    function _currentNoteCommitmentRoot() private view returns (uint256) {
+        return currentNoteCommitmentRoot;
     }
 
     function _currentUserRegistryRoot() private view returns (uint256) {
@@ -534,16 +534,16 @@ contract ShieldedPool {
         return currentAuthPolicyRoot;
     }
 
-    function isAcceptedCommitmentRoot(uint256 root) public view returns (bool) {
-        if (root == _currentCommitmentRoot()) return true;
+    function isAcceptedNoteCommitmentRoot(uint256 root) public view returns (bool) {
+        if (root == _currentNoteCommitmentRoot()) return true;
 
-        uint256 historyLength = commitmentRootHistoryCount;
-        if (historyLength > COMMITMENT_ROOT_HISTORY_SIZE) {
-            historyLength = COMMITMENT_ROOT_HISTORY_SIZE;
+        uint256 historyLength = noteCommitmentRootHistoryCount;
+        if (historyLength > NOTE_COMMITMENT_ROOT_HISTORY_SIZE) {
+            historyLength = NOTE_COMMITMENT_ROOT_HISTORY_SIZE;
         }
 
         for (uint256 slot; slot < historyLength; ++slot) {
-            if (commitmentRootHistory[slot] == root) return true;
+            if (noteCommitmentRootHistory[slot] == root) return true;
         }
 
         return false;
@@ -581,10 +581,10 @@ contract ShieldedPool {
         return false;
     }
 
-    function _pushCommitmentRoot(uint256 root) private {
-        commitmentRootHistory[commitmentRootHistoryCount % COMMITMENT_ROOT_HISTORY_SIZE] = root;
+    function _pushNoteCommitmentRoot(uint256 root) private {
+        noteCommitmentRootHistory[noteCommitmentRootHistoryCount % NOTE_COMMITMENT_ROOT_HISTORY_SIZE] = root;
         unchecked {
-            ++commitmentRootHistoryCount;
+            ++noteCommitmentRootHistoryCount;
         }
     }
 
@@ -606,20 +606,20 @@ contract ShieldedPool {
         authPolicyLastSnapshotBlock = block.number;
     }
 
-    function _insertCommitment(uint256 commitment) private {
+    function _insertNoteCommitment(uint256 commitment) private {
         uint256 index = nextLeafIndex;
         uint256 currentHash = commitment;
 
         for (uint256 level; level < COMMITMENT_TREE_DEPTH; ++level) {
             if (((index >> level) & 1) == 0) {
-                filledSubtrees[level] = currentHash;
-                currentHash = PoseidonFieldLib.hash2Raw(currentHash, commitmentEmptyHashes[level]);
+                filledNoteCommitmentSubtrees[level] = currentHash;
+                currentHash = PoseidonFieldLib.hash2Raw(currentHash, noteCommitmentEmptyHashes[level]);
             } else {
-                currentHash = PoseidonFieldLib.hash2Raw(filledSubtrees[level], currentHash);
+                currentHash = PoseidonFieldLib.hash2Raw(filledNoteCommitmentSubtrees[level], currentHash);
             }
         }
 
-        currentCommitmentRoot = currentHash;
+        currentNoteCommitmentRoot = currentHash;
         nextLeafIndex = index + 1;
     }
 

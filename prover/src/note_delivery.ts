@@ -3,13 +3,13 @@ import { keccak_256 } from '@noble/hashes/sha3'
 import { extract, expand } from '@noble/hashes/hkdf'
 import { sha256 } from '@noble/hashes/sha256'
 import { XWing } from '@noble/post-quantum/hybrid.js'
-import { computeRealNullifier } from '../../src/lib/protocol.ts'
+import { computeNoteCommitment, computeNoteNullifier } from '../../integration/src/eip8182.ts'
 
 interface NoteFields {
   amount: bigint
   ownerAddress: bigint
-  randomness: bigint
-  nullifierKeyHash: bigint
+  noteSecret: bigint
+  ownerNullifierKeyHash: bigint
   tokenAddress: bigint
   originTag: bigint
 }
@@ -19,8 +19,8 @@ interface StoredNote {
   leafIndex: number
   amount: string
   ownerAddress: string
-  randomness: string
-  nullifierKeyHash: string
+  noteSecret: string
+  ownerNullifierKeyHash: string
   tokenAddress: string
   originTag: string
 }
@@ -35,9 +35,10 @@ export interface ShieldedPoolTransactHistoryEntry {
   leafIndex0: number | string
   nullifier0: string
   nullifier1: string
-  commitment0: string
-  commitment1: string
-  commitment2: string
+  transactionReplayId: string
+  noteCommitment0: string
+  noteCommitment1: string
+  noteCommitment2: string
   outputNoteData0: string
   outputNoteData1: string
   outputNoteData2: string
@@ -57,14 +58,7 @@ function fromHexBytes(value: string): Uint8Array {
 }
 
 function noteCommitment(note: NoteFields, pHash: (values: bigint[]) => bigint): bigint {
-  return pHash([
-    note.amount,
-    note.ownerAddress,
-    note.randomness,
-    note.nullifierKeyHash,
-    note.tokenAddress,
-    note.originTag,
-  ])
+  return computeNoteCommitment(pHash, note)
 }
 
 function decodeNotePlaintext(buf: Uint8Array): NoteFields {
@@ -79,8 +73,8 @@ function decodeNotePlaintext(buf: Uint8Array): NoteFields {
   return {
     amount: readWord(0),
     ownerAddress: readWord(32),
-    randomness: readWord(64),
-    nullifierKeyHash: readWord(96),
+    noteSecret: readWord(64),
+    ownerNullifierKeyHash: readWord(96),
     tokenAddress: readWord(128),
     originTag: readWord(160),
   }
@@ -146,7 +140,7 @@ export class NoteStore {
 
   async getUnspentNotes(
     ownerAddress: bigint,
-    nullifierKey: bigint,
+    ownerNullifierKey: bigint,
     deliverySecret: bigint,
   ): Promise<StoredNote[]> {
     const ownerHex = toHex(ownerAddress)
@@ -158,11 +152,7 @@ export class NoteStore {
       if (note.ownerAddress !== ownerHex) continue
       if (BigInt(note.amount) === 0n) continue
 
-      const nullifier = computeRealNullifier(
-        nullifierKey,
-        BigInt(note.randomness),
-        this.pHash,
-      )
+      const nullifier = computeNoteNullifier(this.pHash, ownerNullifierKey, BigInt(note.noteSecret))
       if (this.spentNullifiers.has(toHex(nullifier))) continue
 
       result.push(note)
@@ -178,11 +168,7 @@ export class NoteStore {
       if (decrypted.amount === 0n) continue
       if (BigInt(chainNote.commitment) != noteCommitment(decrypted, this.pHash)) continue
 
-      const nullifier = computeRealNullifier(
-        nullifierKey,
-        decrypted.randomness,
-        this.pHash,
-      )
+      const nullifier = computeNoteNullifier(this.pHash, ownerNullifierKey, decrypted.noteSecret)
       if (this.spentNullifiers.has(toHex(nullifier))) continue
 
       const recoveredNote: StoredNote = {
@@ -190,8 +176,8 @@ export class NoteStore {
         leafIndex: chainNote.leafIndex,
         amount: decrypted.amount.toString(),
         ownerAddress: toHex(decrypted.ownerAddress),
-        randomness: toHex(decrypted.randomness),
-        nullifierKeyHash: toHex(decrypted.nullifierKeyHash),
+        noteSecret: toHex(decrypted.noteSecret),
+        ownerNullifierKeyHash: toHex(decrypted.ownerNullifierKeyHash),
         tokenAddress: toHex(decrypted.tokenAddress),
         originTag: toHex(decrypted.originTag),
       }
@@ -214,9 +200,9 @@ export function replayShieldedPoolTransactsIntoNoteStore(
   for (const transact of sorted) {
     const leafIndex0 = Number(transact.leafIndex0)
     const commitments = [
-      transact.commitment0,
-      transact.commitment1,
-      transact.commitment2,
+      transact.noteCommitment0,
+      transact.noteCommitment1,
+      transact.noteCommitment2,
     ]
     const noteDataFields = [
       transact.outputNoteData0,

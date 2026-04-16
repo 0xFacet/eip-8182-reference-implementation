@@ -11,18 +11,18 @@ const FIELD_MODULUS =
   21888242871839275222246405745257275088548364400416034343698204186575808495617n
 
 const DOMAIN_CONTEXTS = {
-  NULLIFIER_DOMAIN: 'nullifier',
-  PHANTOM_DOMAIN: 'phantom',
+  NOTE_NULLIFIER_DOMAIN: 'note_nullifier',
+  PHANTOM_NULLIFIER_DOMAIN: 'phantom_nullifier',
   ORIGIN_TAG_DOMAIN: 'origin_tag',
-  INTENT_DOMAIN: 'intent',
-  NK_DOMAIN: 'nk',
-  RANDOMNESS_DOMAIN: 'randomness',
-  INTENT_DIGEST_DOMAIN: 'intent_digest',
+  TRANSACTION_REPLAY_ID_DOMAIN: 'transaction_replay_id',
+  OWNER_NULLIFIER_KEY_HASH_DOMAIN: 'owner_nullifier_key_hash',
+  NOTE_SECRET_DOMAIN: 'note_secret',
+  TRANSACTION_INTENT_DIGEST_DOMAIN: 'transaction_intent_digest',
   OUTPUT_BINDING_DOMAIN: 'output_binding',
   AUTH_POLICY_DOMAIN: 'auth_policy',
   AUTH_POLICY_KEY_DOMAIN: 'auth_policy_key',
   AUTH_VK_DOMAIN: 'auth_vk',
-  OUTPUT_SECRET_DOMAIN: 'output_secret',
+  NOTE_SECRET_SEED_DOMAIN: 'note_secret_seed',
   USER_REGISTRY_LEAF_DOMAIN: 'user_registry_leaf',
 }
 
@@ -101,7 +101,7 @@ pub global LOCK_OUTPUT_BINDING_0: Field = 1;
 pub global LOCK_OUTPUT_BINDING_1: Field = 2;
 pub global LOCK_OUTPUT_BINDING_2: Field = 4;
 
-pub global DUMMY_NK_PREIMAGE: Field = 0xdead;
+pub global DUMMY_OWNER_NULLIFIER_KEY_PREIMAGE: Field = 0xdead;
 `
 }
 

@@ -16,7 +16,7 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
     uint256 private constant REGISTRY_TREE_DEPTH = 160;
     uint256 private constant MAX_COMMITMENT_LEAF_INDEX = type(uint32).max;
     uint256 private constant MAX_VALID_UNTIL_SECONDS = type(uint32).max;
-    uint256 private constant COMMITMENT_ROOT_HISTORY_SIZE = 500;
+    uint256 private constant NOTE_COMMITMENT_ROOT_HISTORY_SIZE = 500;
     uint256 private constant USER_REGISTRY_ROOT_HISTORY_BLOCKS = 500;
     uint256 private constant AUTH_POLICY_ROOT_HISTORY_BLOCKS = 64;
 
@@ -31,21 +31,21 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
     }
 
     function test_InitialRootsAreNonZero() public view {
-        (uint256 commitmentRoot, uint256 userRoot, uint256 authRoot) = pool.getCurrentRoots();
+        (uint256 noteCommitmentRoot, uint256 userRoot, uint256 authRoot) = pool.getCurrentRoots();
 
-        assertTrue(commitmentRoot != 0);
+        assertTrue(noteCommitmentRoot != 0);
         assertTrue(userRoot != 0);
         assertTrue(authRoot != 0);
-        assertTrue(pool.isAcceptedCommitmentRoot(commitmentRoot));
+        assertTrue(pool.isAcceptedNoteCommitmentRoot(noteCommitmentRoot));
         assertTrue(pool.isAcceptedUserRegistryRoot(userRoot));
         assertTrue(pool.isAcceptedAuthPolicyRoot(authRoot));
         assertFalse(pool.isAcceptedUserRegistryRoot(0));
         assertFalse(pool.isAcceptedAuthPolicyRoot(0));
 
-        (bool registered, uint256 nkHash, uint256 outputSecretHash) = pool.getUserRegistryEntry(ALICE);
+        (bool registered, uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHash) = pool.getUserRegistryEntry(ALICE);
         assertFalse(registered);
-        assertEq(nkHash, 0);
-        assertEq(outputSecretHash, 0);
+        assertEq(ownerNullifierKeyHash, 0);
+        assertEq(noteSecretSeedHash, 0);
     }
 
     function test_InstallerSeedsEmptyHashCache() public {
@@ -53,31 +53,31 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
     }
 
     function test_PoseidonFieldDomainsMatchDerivedFormula() public pure {
-        uint256 outputSecret = 123;
+        uint256 noteSecretSeed = 123;
         uint256 commitment = 456;
         uint256 outputNoteDataHash = 789;
         address user = address(0xA11CE);
-        uint256 nullifierKeyHash = 11;
-        uint256 outputSecretHashValue = 22;
+        uint256 ownerNullifierKeyHash = 11;
+        uint256 noteSecretSeedHashValue = 22;
         uint256 authDataCommitment = 200;
         uint256 policyVersion = 3;
         uint256 innerVkHash = 100;
 
         assertEq(
-            PoseidonFieldLib.outputSecretHash(outputSecret),
-            PoseidonFieldLib.poseidon2(_deriveEip8182Domain("output_secret"), outputSecret)
+            PoseidonFieldLib.noteSecretSeedHash(noteSecretSeed),
+            PoseidonFieldLib.poseidon2(_deriveEip8182Domain("note_secret_seed"), noteSecretSeed)
         );
         assertEq(
             PoseidonFieldLib.outputBinding(commitment, outputNoteDataHash),
             PoseidonFieldLib.poseidon3(_deriveEip8182Domain("output_binding"), commitment, outputNoteDataHash)
         );
         assertEq(
-            PoseidonFieldLib.userRegistryLeaf(user, nullifierKeyHash, outputSecretHashValue),
+            PoseidonFieldLib.userRegistryLeaf(user, ownerNullifierKeyHash, noteSecretSeedHashValue),
             PoseidonFieldLib.poseidon4(
                 _deriveEip8182Domain("user_registry_leaf"),
                 uint256(uint160(user)),
-                nullifierKeyHash,
-                outputSecretHashValue
+                ownerNullifierKeyHash,
+                noteSecretSeedHashValue
             )
         );
         assertEq(
@@ -95,32 +95,32 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
             )
         );
         assertEq(
-            PoseidonFieldLib.dummyNullifierKeyHash(),
-            PoseidonFieldLib.poseidon2(_deriveEip8182Domain("nk"), 0xdead)
+            PoseidonFieldLib.dummyOwnerNullifierKeyHash(),
+            PoseidonFieldLib.poseidon2(_deriveEip8182Domain("owner_nullifier_key_hash"), 0xdead)
         );
     }
 
     function test_FirstInsertionRootMatchesProverEmptyHashSemantics() public {
         ShieldedPool.PublicInputs memory pi = _basePublicInputs();
         uint256[] memory commitments = new uint256[](3);
-        commitments[0] = pi.commitment0;
-        commitments[1] = pi.commitment1;
-        commitments[2] = pi.commitment2;
+        commitments[0] = pi.noteCommitment0;
+        commitments[1] = pi.noteCommitment1;
+        commitments[2] = pi.noteCommitment2;
 
         pool.transact(hex"01", pi, "", "", "");
 
-        (uint256 commitmentRoot,,) = pool.getCurrentRoots();
-        assertEq(commitmentRoot, _expectedCommitmentRoot(0, commitments));
+        (uint256 noteCommitmentRoot,,) = pool.getCurrentRoots();
+        assertEq(noteCommitmentRoot, _expectedCommitmentRoot(0, commitments));
     }
 
     function test_RegisterUserStoresDeliveryKey() public {
         vm.prank(ALICE);
         pool.registerUser(11, 22, 1, hex"1234");
 
-        (bool registered, uint256 nkHash, uint256 outputSecretHash) = pool.getUserRegistryEntry(ALICE);
+        (bool registered, uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHash) = pool.getUserRegistryEntry(ALICE);
         assertTrue(registered);
-        assertEq(nkHash, 11);
-        assertEq(outputSecretHash, 22);
+        assertEq(ownerNullifierKeyHash, 11);
+        assertEq(noteSecretSeedHash, 22);
 
         (uint32 schemeId, bytes memory keyBytes) = pool.getDeliveryKey(ALICE);
         assertEq(schemeId, 1);
@@ -154,12 +154,12 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
         pool.registerUser(11, 22);
 
         vm.prank(ALICE);
-        pool.rotateOutputSecret(33);
+        pool.rotateNoteSecretSeed(33);
 
-        (bool registered, uint256 nkHash, uint256 outputSecretHash) = pool.getUserRegistryEntry(ALICE);
+        (bool registered, uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHash) = pool.getUserRegistryEntry(ALICE);
         assertTrue(registered);
-        assertEq(nkHash, 11);
-        assertEq(outputSecretHash, 33);
+        assertEq(ownerNullifierKeyHash, 11);
+        assertEq(noteSecretSeedHash, 33);
     }
 
     function test_AuthPolicyVersionPersistsAcrossDeregistration() public {
@@ -241,7 +241,7 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
     function test_TransactRejectsNonCanonicalProofDerivedFields() public {
         ShieldedPool.PublicInputs memory pi = _basePublicInputs();
 
-        pi.merkleRoot = FIELD_MODULUS;
+        pi.noteCommitmentRoot = FIELD_MODULUS;
         _expectNonCanonicalTransactRevert(pi);
 
         pi = _basePublicInputs();
@@ -253,19 +253,19 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
         _expectNonCanonicalTransactRevert(pi);
 
         pi = _basePublicInputs();
-        pi.commitment0 = FIELD_MODULUS;
+        pi.noteCommitment0 = FIELD_MODULUS;
         _expectNonCanonicalTransactRevert(pi);
 
         pi = _basePublicInputs();
-        pi.commitment1 = FIELD_MODULUS;
+        pi.noteCommitment1 = FIELD_MODULUS;
         _expectNonCanonicalTransactRevert(pi);
 
         pi = _basePublicInputs();
-        pi.commitment2 = FIELD_MODULUS;
+        pi.noteCommitment2 = FIELD_MODULUS;
         _expectNonCanonicalTransactRevert(pi);
 
         pi = _basePublicInputs();
-        pi.intentNullifier = FIELD_MODULUS;
+        pi.transactionReplayId = FIELD_MODULUS;
         _expectNonCanonicalTransactRevert(pi);
 
         pi = _basePublicInputs();
@@ -302,14 +302,14 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
 
         assertFalse(pool.isNullifierSpent(pi.nullifier0));
         assertFalse(pool.isNullifierSpent(pi.nullifier1));
-        assertFalse(pool.isIntentNullifierUsed(pi.intentNullifier));
+        assertFalse(pool.isTransactionReplayIdUsed(pi.transactionReplayId));
 
         vm.recordLogs();
         pool.transact(hex"01", pi, "", "", "");
 
         assertTrue(pool.isNullifierSpent(pi.nullifier0));
         assertTrue(pool.isNullifierSpent(pi.nullifier1));
-        assertTrue(pool.isIntentNullifierUsed(pi.intentNullifier));
+        assertTrue(pool.isTransactionReplayIdUsed(pi.transactionReplayId));
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
         Vm.Log memory txnLog = logs[logs.length - 1];
@@ -322,24 +322,24 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
         );
         assertEq(uint256(txnLog.topics[1]), pi.nullifier0);
         assertEq(uint256(txnLog.topics[2]), pi.nullifier1);
-        assertEq(uint256(txnLog.topics[3]), pi.intentNullifier);
+        assertEq(uint256(txnLog.topics[3]), pi.transactionReplayId);
 
         (
-            uint256 commitment0,
-            uint256 commitment1,
-            uint256 commitment2,
+            uint256 noteCommitment0,
+            uint256 noteCommitment1,
+            uint256 noteCommitment2,
             uint256 leafIndex0,
-            uint256 postInsertionRoot,
+            uint256 postInsertionCommitmentRoot,
             bytes memory noteData0,
             bytes memory noteData1,
             bytes memory noteData2
         ) = abi.decode(txnLog.data, (uint256, uint256, uint256, uint256, uint256, bytes, bytes, bytes));
 
-        assertEq(commitment0, pi.commitment0);
-        assertEq(commitment1, pi.commitment1);
-        assertEq(commitment2, pi.commitment2);
+        assertEq(noteCommitment0, pi.noteCommitment0);
+        assertEq(noteCommitment1, pi.noteCommitment1);
+        assertEq(noteCommitment2, pi.noteCommitment2);
         assertEq(leafIndex0, 0);
-        assertTrue(postInsertionRoot != pi.merkleRoot);
+        assertTrue(postInsertionCommitmentRoot != pi.noteCommitmentRoot);
         assertEq(noteData0.length, 0);
         assertEq(noteData1.length, 0);
         assertEq(noteData2.length, 0);
@@ -350,18 +350,18 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
 
     function test_CommitmentHistoryAcceptsPreviousPreInsertionRoot() public {
         ShieldedPool.PublicInputs memory firstTx = _basePublicInputs();
-        uint256 emptyRoot = firstTx.merkleRoot;
+        uint256 emptyRoot = firstTx.noteCommitmentRoot;
 
         pool.transact(hex"01", firstTx, "", "", "");
 
         ShieldedPool.PublicInputs memory secondTx = _basePublicInputs();
-        secondTx.merkleRoot = emptyRoot;
+        secondTx.noteCommitmentRoot = emptyRoot;
         secondTx.nullifier0 = 21;
         secondTx.nullifier1 = 22;
-        secondTx.intentNullifier = 23;
-        secondTx.commitment0 = 31;
-        secondTx.commitment1 = 32;
-        secondTx.commitment2 = 33;
+        secondTx.transactionReplayId = 23;
+        secondTx.noteCommitment0 = 31;
+        secondTx.noteCommitment1 = 32;
+        secondTx.noteCommitment2 = 33;
 
         pool.transact(hex"01", secondTx, "", "", "");
     }
@@ -387,26 +387,26 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
         ShieldedPool.PublicInputs memory overflowTx = _basePublicInputs();
         overflowTx.nullifier0 = 101;
         overflowTx.nullifier1 = 102;
-        overflowTx.intentNullifier = 103;
-        overflowTx.commitment0 = 111;
-        overflowTx.commitment1 = 112;
-        overflowTx.commitment2 = 113;
+        overflowTx.transactionReplayId = 103;
+        overflowTx.noteCommitment0 = 111;
+        overflowTx.noteCommitment1 = 112;
+        overflowTx.noteCommitment2 = 113;
 
         vm.expectRevert(ShieldedPool.TreeFull.selector);
         pool.transact(hex"01", overflowTx, "", "", "");
     }
 
     function test_CommitmentHistoryRejectsRootAfterWraparound() public {
-        uint256 evictedRoot = _basePublicInputs().merkleRoot;
+        uint256 evictedRoot = _basePublicInputs().noteCommitmentRoot;
 
         pool.transact(hex"01", _sequencedPublicInputs(1), "", "", "");
-        setCommitmentRootHistoryCountForTest(COMMITMENT_ROOT_HISTORY_SIZE);
+        setCommitmentRootHistoryCountForTest(NOTE_COMMITMENT_ROOT_HISTORY_SIZE);
         pool.transact(hex"01", _sequencedPublicInputs(2), "", "", "");
 
         ShieldedPool.PublicInputs memory staleRootTx = _sequencedPublicInputs(1000);
-        staleRootTx.merkleRoot = evictedRoot;
+        staleRootTx.noteCommitmentRoot = evictedRoot;
 
-        vm.expectRevert(ShieldedPool.UnknownCommitmentRoot.selector);
+        vm.expectRevert(ShieldedPool.UnknownNoteCommitmentRoot.selector);
         pool.transact(hex"01", staleRootTx, "", "", "");
     }
 
@@ -442,7 +442,7 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
 
         vm.roll(block.number + 1);
         vm.prank(ALICE);
-        pool.rotateOutputSecret(33);
+        pool.rotateNoteSecretSeed(33);
 
         ShieldedPool.PublicInputs memory recentRootTx = _basePublicInputs();
         recentRootTx.registryRoot = oldUserRoot;
@@ -454,10 +454,10 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
         expiredRootTx.registryRoot = oldUserRoot;
         expiredRootTx.nullifier0 = 51;
         expiredRootTx.nullifier1 = 52;
-        expiredRootTx.intentNullifier = 53;
-        expiredRootTx.commitment0 = 61;
-        expiredRootTx.commitment1 = 62;
-        expiredRootTx.commitment2 = 63;
+        expiredRootTx.transactionReplayId = 53;
+        expiredRootTx.noteCommitment0 = 61;
+        expiredRootTx.noteCommitment1 = 62;
+        expiredRootTx.noteCommitment2 = 63;
 
         vm.expectRevert(ShieldedPool.UnknownUserRegistryRoot.selector);
         pool.transact(hex"01", expiredRootTx, "", "", "");
@@ -644,7 +644,7 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
 
         vm.prank(ALICE);
         vm.expectRevert(ShieldedPool.FieldElementNotCanonical.selector);
-        pool.rotateOutputSecret(FIELD_MODULUS);
+        pool.rotateNoteSecretSeed(FIELD_MODULUS);
     }
 
     function test_RegisterAuthPolicyRejectsNonCanonicalInnerVkHash() public {
@@ -684,51 +684,51 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
 
     // ── Intent nullifier replay ─────────────────────────────────────────
 
-    function test_TransactRejectsReusedIntentNullifier() public {
+    function test_TransactRejectsReusedTransactionReplayId() public {
         ShieldedPool.PublicInputs memory firstTx = _basePublicInputs();
         pool.transact(hex"01", firstTx, "", "", "");
 
         ShieldedPool.PublicInputs memory secondTx = _sequencedPublicInputs(500);
-        secondTx.intentNullifier = firstTx.intentNullifier;
+        secondTx.transactionReplayId = firstTx.transactionReplayId;
 
-        vm.expectRevert(ShieldedPool.IntentNullifierAlreadyUsed.selector);
+        vm.expectRevert(ShieldedPool.TransactionReplayIdAlreadyUsed.selector);
         pool.transact(hex"01", secondTx, "", "", "");
     }
 
     // ── Zero commitment rejection ───────────────────────────────────────
 
-    function test_TransactRejectsZeroCommitment0() public {
+    function test_TransactRejectsZeroNoteCommitment0() public {
         ShieldedPool.PublicInputs memory pi = _basePublicInputs();
-        pi.commitment0 = 0;
+        pi.noteCommitment0 = 0;
 
-        vm.expectRevert(ShieldedPool.ZeroCommitment.selector);
+        vm.expectRevert(ShieldedPool.ZeroNoteCommitment.selector);
         pool.transact(hex"01", pi, "", "", "");
     }
 
-    function test_TransactRejectsZeroCommitment1() public {
+    function test_TransactRejectsZeroNoteCommitment1() public {
         ShieldedPool.PublicInputs memory pi = _basePublicInputs();
-        pi.commitment1 = 0;
+        pi.noteCommitment1 = 0;
 
-        vm.expectRevert(ShieldedPool.ZeroCommitment.selector);
+        vm.expectRevert(ShieldedPool.ZeroNoteCommitment.selector);
         pool.transact(hex"01", pi, "", "", "");
     }
 
-    function test_TransactRejectsZeroCommitment2() public {
+    function test_TransactRejectsZeroNoteCommitment2() public {
         ShieldedPool.PublicInputs memory pi = _basePublicInputs();
-        pi.commitment2 = 0;
+        pi.noteCommitment2 = 0;
 
-        vm.expectRevert(ShieldedPool.ZeroCommitment.selector);
+        vm.expectRevert(ShieldedPool.ZeroNoteCommitment.selector);
         pool.transact(hex"01", pi, "", "", "");
     }
 
     function _basePublicInputs() private view returns (ShieldedPool.PublicInputs memory pi) {
-        (pi.merkleRoot, pi.registryRoot, pi.authPolicyRegistryRoot) = pool.getCurrentRoots();
+        (pi.noteCommitmentRoot, pi.registryRoot, pi.authPolicyRegistryRoot) = pool.getCurrentRoots();
         pi.nullifier0 = 1;
         pi.nullifier1 = 2;
-        pi.commitment0 = 11;
-        pi.commitment1 = 12;
-        pi.commitment2 = 13;
-        pi.intentNullifier = 3;
+        pi.noteCommitment0 = 11;
+        pi.noteCommitment1 = 12;
+        pi.noteCommitment2 = 13;
+        pi.transactionReplayId = 3;
         pi.validUntilSeconds = block.timestamp + 1 hours;
         pi.executionChainId = block.chainid;
 
@@ -747,10 +747,10 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
         uint256 offset = seed * 10;
         pi.nullifier0 = offset + 1;
         pi.nullifier1 = offset + 2;
-        pi.intentNullifier = offset + 3;
-        pi.commitment0 = offset + 4;
-        pi.commitment1 = offset + 5;
-        pi.commitment2 = offset + 6;
+        pi.transactionReplayId = offset + 3;
+        pi.noteCommitment0 = offset + 4;
+        pi.noteCommitment1 = offset + 5;
+        pi.noteCommitment2 = offset + 6;
     }
 
     function _expectNonCanonicalTransactRevert(ShieldedPool.PublicInputs memory pi) private {
@@ -764,7 +764,7 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
         returns (uint256)
     {
         uint256[COMMITMENT_TREE_DEPTH] memory emptyHashes;
-        uint256[COMMITMENT_TREE_DEPTH] memory filledSubtrees;
+        uint256[COMMITMENT_TREE_DEPTH] memory filledNoteCommitmentSubtrees;
         uint256 nextIndex_ = startingIndex;
         uint256 root = _emptyHashBase();
 
@@ -779,10 +779,10 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
 
             for (uint256 level; level < COMMITMENT_TREE_DEPTH; ++level) {
                 if (((index >> level) & 1) == 0) {
-                    filledSubtrees[level] = currentHash;
+                    filledNoteCommitmentSubtrees[level] = currentHash;
                     currentHash = PoseidonFieldLib.hash2Raw(currentHash, emptyHashes[level]);
                 } else {
-                    currentHash = PoseidonFieldLib.hash2Raw(filledSubtrees[level], currentHash);
+                    currentHash = PoseidonFieldLib.hash2Raw(filledNoteCommitmentSubtrees[level], currentHash);
                 }
             }
 

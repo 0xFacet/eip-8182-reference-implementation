@@ -10,8 +10,6 @@ import {
   buildSingleSigAuthorizationTypedData,
   DELIVERY_SCHEME_X_WING,
   hexToBytes,
-  NK_DOMAIN,
-  OUTPUT_SECRET_DOMAIN,
   PROTOCOL_VERIFYING_CONTRACT,
   singleSigAuthDataCommitment,
 } from "../../src/lib/protocol.ts";
@@ -19,6 +17,10 @@ import {
   createPoseidonHelpers,
 } from "./tx_proof_shared.ts";
 import { deriveDeliveryKeypair } from "../../prover/src/note_delivery.ts";
+import {
+  computeNoteSecretSeedHash,
+  computeOwnerNullifierKeyHash,
+} from "./eip8182.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -40,14 +42,14 @@ const ANVIL_MNEMONIC = "test test test test test test test test test test test j
 const ANVIL_FIRST_PRIVATE_KEY =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const NULLIFIER_KEY = 0x9999n;
-const OUTPUT_SECRET = 0xbeefn;
+const NOTE_SECRET_SEED = 0xbeefn;
 const DELIVERY_SECRET = 0xcafen;
 const DEPOSIT_AMOUNT = ethers.utils.parseEther("0.1");
 
 const SHIELDED_POOL_ABI = [
   "function registerUser(uint256,uint256,uint32,bytes)",
   "function registerAuthPolicy(uint256,uint256)",
-  "function transact(bytes,(uint256 merkleRoot,uint256 nullifier0,uint256 nullifier1,uint256 commitment0,uint256 commitment1,uint256 commitment2,uint256 publicAmountIn,uint256 publicAmountOut,uint256 publicRecipientAddress,uint256 publicTokenAddress,uint256 depositorAddress,uint256 intentNullifier,uint256 registryRoot,uint256 validUntilSeconds,uint256 executionChainId,uint256 authPolicyRegistryRoot,uint256 outputNoteDataHash0,uint256 outputNoteDataHash1,uint256 outputNoteDataHash2),bytes,bytes,bytes) payable",
+  "function transact(bytes,(uint256 noteCommitmentRoot,uint256 nullifier0,uint256 nullifier1,uint256 noteCommitment0,uint256 noteCommitment1,uint256 noteCommitment2,uint256 publicAmountIn,uint256 publicAmountOut,uint256 publicRecipientAddress,uint256 publicTokenAddress,uint256 depositorAddress,uint256 transactionReplayId,uint256 registryRoot,uint256 validUntilSeconds,uint256 executionChainId,uint256 authPolicyRegistryRoot,uint256 outputNoteDataHash0,uint256 outputNoteDataHash1,uint256 outputNoteDataHash2),bytes,bytes,bytes) payable",
 ] as const;
 
 const HONK_VERIFIER_ABI = [
@@ -114,8 +116,8 @@ async function main() {
     const pool = new ethers.Contract(POOL_ADDRESS, SHIELDED_POOL_ABI, signer);
     await waitForTx(
       pool["registerUser(uint256,uint256,uint32,bytes)"](
-        user.nkHash,
-        user.osHash,
+        user.ownerNullifierKeyHash,
+        user.noteSecretSeedHash,
         Number(DELIVERY_SCHEME_X_WING),
         user.deliveryPubKey,
       ),
@@ -165,8 +167,8 @@ async function main() {
       depositorAddress: signer.address,
       amount: DEPOSIT_AMOUNT.toString(),
       tokenAddress: "0",
-      nullifierKey: `0x${NULLIFIER_KEY.toString(16)}`,
-      outputSecret: `0x${OUTPUT_SECRET.toString(16)}`,
+      ownerNullifierKey: `0x${NULLIFIER_KEY.toString(16)}`,
+      noteSecretSeed: `0x${NOTE_SECRET_SEED.toString(16)}`,
       policyVersion: "1",
       nonce: nonce.toString(),
       validUntilSeconds: validUntilSeconds.toString(),
@@ -203,10 +205,10 @@ async function main() {
     }
 
     try {
-      const precompileCallData = ethers.utils.defaultAbiCoder.encode(
+    const precompileCallData = ethers.utils.defaultAbiCoder.encode(
         [
           "bytes",
-          "tuple(uint256 merkleRoot,uint256 nullifier0,uint256 nullifier1,uint256 commitment0,uint256 commitment1,uint256 commitment2,uint256 publicAmountIn,uint256 publicAmountOut,uint256 publicRecipientAddress,uint256 publicTokenAddress,uint256 depositorAddress,uint256 intentNullifier,uint256 registryRoot,uint256 validUntilSeconds,uint256 executionChainId,uint256 authPolicyRegistryRoot,uint256 outputNoteDataHash0,uint256 outputNoteDataHash1,uint256 outputNoteDataHash2)",
+          "tuple(uint256 noteCommitmentRoot,uint256 nullifier0,uint256 nullifier1,uint256 noteCommitment0,uint256 noteCommitment1,uint256 noteCommitment2,uint256 publicAmountIn,uint256 publicAmountOut,uint256 publicRecipientAddress,uint256 publicTokenAddress,uint256 depositorAddress,uint256 transactionReplayId,uint256 registryRoot,uint256 validUntilSeconds,uint256 executionChainId,uint256 authPolicyRegistryRoot,uint256 outputNoteDataHash0,uint256 outputNoteDataHash1,uint256 outputNoteDataHash2)",
         ],
         [proveResponse.proof, publicInputs],
       );
@@ -261,7 +263,7 @@ async function main() {
     await tx.wait();
 
     const notesResponse = await fetch(
-      `${PROVER_URL}/notes/${signer.address}?nullifierKey=0x${NULLIFIER_KEY.toString(16)}&deliverySecret=0x${DELIVERY_SECRET.toString(16)}`,
+      `${PROVER_URL}/notes/${signer.address}?ownerNullifierKey=0x${NULLIFIER_KEY.toString(16)}&deliverySecret=0x${DELIVERY_SECRET.toString(16)}`,
     );
     assert.equal(notesResponse.ok, true, "notes endpoint failed");
     const notesJson = (await notesResponse.json()) as {
@@ -307,13 +309,13 @@ async function deriveSingleSigUser(_authorizingAddress: string) {
     pubKeyY,
     helpers.pHash,
   );
-  const nkHash = helpers.pHash([NK_DOMAIN, NULLIFIER_KEY]);
-  const osHash = helpers.pHash([OUTPUT_SECRET_DOMAIN, OUTPUT_SECRET]);
+  const ownerNullifierKeyHash = computeOwnerNullifierKeyHash(helpers.pHash, NULLIFIER_KEY);
+  const noteSecretSeedHash = computeNoteSecretSeedHash(helpers.pHash, NOTE_SECRET_SEED);
   const { publicKey: deliveryPubKey } = deriveDeliveryKeypair(DELIVERY_SECRET);
 
   return {
-    nkHash,
-    osHash,
+    ownerNullifierKeyHash,
+    noteSecretSeedHash,
     authDataCommitment,
     deliveryPubKey: ethers.utils.hexlify(deliveryPubKey),
   };
@@ -376,18 +378,18 @@ async function installPool(provider: ethers.providers.JsonRpcProvider) {
 function publicInputsStruct(publicInputs: string[]) {
   assert.equal(publicInputs.length, 19, "unexpected public input count");
   return {
-    merkleRoot: BigInt(publicInputs[0]),
+    noteCommitmentRoot: BigInt(publicInputs[0]),
     nullifier0: BigInt(publicInputs[1]),
     nullifier1: BigInt(publicInputs[2]),
-    commitment0: BigInt(publicInputs[3]),
-    commitment1: BigInt(publicInputs[4]),
-    commitment2: BigInt(publicInputs[5]),
+    noteCommitment0: BigInt(publicInputs[3]),
+    noteCommitment1: BigInt(publicInputs[4]),
+    noteCommitment2: BigInt(publicInputs[5]),
     publicAmountIn: BigInt(publicInputs[6]),
     publicAmountOut: BigInt(publicInputs[7]),
     publicRecipientAddress: BigInt(publicInputs[8]),
     publicTokenAddress: BigInt(publicInputs[9]),
     depositorAddress: BigInt(publicInputs[10]),
-    intentNullifier: BigInt(publicInputs[11]),
+    transactionReplayId: BigInt(publicInputs[11]),
     registryRoot: BigInt(publicInputs[12]),
     validUntilSeconds: BigInt(publicInputs[13]),
     executionChainId: BigInt(publicInputs[14]),

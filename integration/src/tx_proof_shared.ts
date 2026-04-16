@@ -10,36 +10,39 @@ import { sha256 } from "@noble/hashes/sha256";
 import { createCipheriv, randomBytes } from "crypto";
 import { execSync } from "child_process";
 import {
-  AUTH_POLICY_DOMAIN,
-  AUTH_POLICY_KEY_DOMAIN,
   DELIVERY_SCHEME_X_WING,
-  computeAuthVkHash,
   bytesToHex,
-  computeIntentDigest,
-  computeIntentNullifier,
-  computeOutputBinding,
-  computeRealNullifier,
   DEPOSIT_OPERATION_KIND,
   defaultExecutionConstraints,
   FIELD_MODULUS,
   hexToBytes,
   type ExecutionConstraints,
-  ORIGIN_TAG_DOMAIN,
   LOCK_OUTPUT_BINDING_0,
   LOCK_OUTPUT_BINDING_1,
   LOCK_OUTPUT_BINDING_2,
   ORIGIN_MODE_DEFAULT,
-  NK_DOMAIN,
   normalizeExecutionConstraints,
-  OUTPUT_SECRET_DOMAIN,
-  PHANTOM_DOMAIN,
   PROTOCOL_COMMITMENT_TREE_DEPTH,
   PROTOCOL_VERIFYING_CONTRACT_FIELD,
-  RANDOMNESS_DOMAIN,
   TRANSFER_OPERATION_KIND,
   WITHDRAWAL_OPERATION_KIND,
   X_WING_PUBLIC_KEY_LENGTH,
 } from "../../src/lib/protocol.ts";
+import {
+  AUTH_POLICY_DOMAIN,
+  AUTH_POLICY_KEY_DOMAIN,
+  AUTH_VK_DOMAIN,
+  ORIGIN_TAG_DOMAIN,
+  computeNoteBinding,
+  computeNoteCommitment,
+  computeNoteNullifier,
+  computeNoteSecret,
+  computeNoteSecretSeedHash,
+  computeOwnerNullifierKeyHash,
+  computePhantomNullifier,
+  computeTransactionIntentDigest,
+  computeTransactionReplayId,
+} from "./eip8182.ts";
 import { execLogged, withLoggedCircuitLock } from "./ffi_debug.ts";
 import type { FfiLogger } from "./ffi_debug.ts";
 
@@ -97,8 +100,8 @@ export interface PoseidonHelpers {
 export interface TransactionNote {
   amount: bigint;
   ownerAddress: bigint;
-  randomness: bigint;
-  nullifierKeyHash: bigint;
+  noteSecret: bigint;
+  ownerNullifierKeyHash: bigint;
   tokenAddress: bigint;
   originTag: bigint;
 }
@@ -120,7 +123,7 @@ export interface OuterWitnessOverrides {
   policyVersion?: bigint;
 }
 
-export interface IntentWitness {
+export interface TransactionIntentWitness {
   authorizingAddress: bigint;
   policyVersion: bigint;
   operationKind: bigint;
@@ -134,7 +137,7 @@ export interface IntentWitness {
   validUntilSeconds: bigint;
   executionChainId: bigint;
   executionConstraints: ExecutionConstraints;
-  intentDigest: bigint;
+  transactionIntentDigest: bigint;
 }
 
 export interface SingleSigAuthorizationWitness {
@@ -161,28 +164,28 @@ export interface TxProofParams {
   feeRecipientAddress?: string;
   feeAmount?: string;
   feeNoteOwner?: string;
-  nullifierKey: string;
-  outputSecret: string;
+  ownerNullifierKey: string;
+  noteSecretSeed: string;
   policyVersion?: string;
   originMode?: string;
   nonce: string;
   validUntilSeconds: string;
   executionChainId: string;
-  commitmentRoot: string;
+  noteCommitmentRoot: string;
   userRegistryRoot: string;
   authPolicyRoot: string;
   inputLeafIndex?: string;
   inputAmount?: string;
-  inputRandomness?: string;
+  inputNoteSecret?: string;
   inputOriginTag?: string;
   inputSiblings?: unknown;
   userSiblings?: unknown;
   recipientSiblings?: unknown;
   authSiblings?: unknown;
-  recipientNkHash?: string;
-  recipientOsHash?: string;
-  feeNkHash?: string;
-  feeOsHash?: string;
+  recipientOwnerNullifierKeyHash?: string;
+  recipientNoteSecretSeedHash?: string;
+  feeOwnerNullifierKeyHash?: string;
+  feeNoteSecretSeedHash?: string;
   feeSiblings?: unknown;
   changeAmount?: string;
   deliverySchemeId?: string;
@@ -214,21 +217,24 @@ export interface CommonTxArtifacts {
   feeRecipientAddress: bigint;
   feeAmount: bigint;
   feeNoteOwner: bigint;
-  nullifierKey: bigint;
-  outputSecret: bigint;
+  ownerNullifierKey: bigint;
+  noteSecretSeed: bigint;
   policyVersion: bigint;
   originMode: bigint;
   nonce: bigint;
   validUntilSeconds: bigint;
   executionChainId: bigint;
-  commitmentRoot: bigint;
+  noteCommitmentRoot: bigint;
   userRegistryRoot: bigint;
   authPolicyRoot: bigint;
-  nkHash: bigint;
-  osHash: bigint;
+  ownerNullifierKeyHash: bigint;
+  noteSecretSeedHash: bigint;
   note0: TransactionNote;
   note1: TransactionNote;
   note2: TransactionNote;
+  noteCommitment0: bigint;
+  noteCommitment1: bigint;
+  noteCommitment2: bigint;
   out0: bigint;
   out1: bigint;
   out2: bigint;
@@ -236,26 +242,26 @@ export interface CommonTxArtifacts {
   enc1: EncryptedNoteData;
   enc2: EncryptedNoteData;
   executionConstraints: ExecutionConstraints;
-  intentDigest: bigint;
+  transactionIntentDigest: bigint;
   outputBinding0: bigint;
   outputBinding1: bigint;
   outputBinding2: bigint;
-  intentNullifier: bigint;
+  transactionReplayId: bigint;
   nullifier0: bigint;
   nullifier1: bigint;
   changeAmount: bigint;
   inputLeafIndex?: bigint;
   inputAmount?: bigint;
-  inputRandomness?: bigint;
+  inputNoteSecret?: bigint;
   inputOriginTag?: bigint;
   inputSiblings?: string[];
   userSiblings: string[];
   recipientSiblings: string[];
-  recipientNkHash: bigint;
-  recipientOsHash: bigint;
+  recipientOwnerNullifierKeyHash: bigint;
+  recipientNoteSecretSeedHash: bigint;
   feeSiblings: string[];
-  feeNkHash: bigint;
-  feeOsHash: bigint;
+  feeOwnerNullifierKeyHash: bigint;
+  feeNoteSecretSeedHash: bigint;
   authSiblings: string[];
   empty160: string[];
 }
@@ -594,8 +600,8 @@ export function buildCommonTxArtifacts(
   const tokenAddress = toBigInt(params.tokenAddress, 0n);
   const feeRecipientAddress = toBigInt(params.feeRecipientAddress, 0n);
   const feeAmount = toBigInt(params.feeAmount, 0n);
-  const nullifierKey = toBigInt(params.nullifierKey);
-  const outputSecret = toBigInt(params.outputSecret);
+  const ownerNullifierKey = toBigInt(params.ownerNullifierKey);
+  const noteSecretSeed = toBigInt(params.noteSecretSeed);
   const policyVersion = toBigInt(params.policyVersion, 1n);
   const originMode = toBigInt(
     params.originMode,
@@ -604,7 +610,7 @@ export function buildCommonTxArtifacts(
   const nonce = toBigInt(params.nonce);
   const validUntilSeconds = toBigInt(params.validUntilSeconds);
   const executionChainId = toBigInt(params.executionChainId);
-  const commitmentRoot = toBigInt(params.commitmentRoot);
+  const noteCommitmentRoot = toBigInt(params.noteCommitmentRoot);
   const userRegistryRoot = toBigInt(params.userRegistryRoot);
   const authPolicyRoot = toBigInt(params.authPolicyRoot);
   const hasFee = feeAmount !== 0n;
@@ -618,26 +624,26 @@ export function buildCommonTxArtifacts(
         : TRANSFER_OPERATION_KIND;
   const publicAmountIn = params.mode === "deposit" ? amount + feeAmount : 0n;
 
-  const nkHash = pHash([NK_DOMAIN, nullifierKey]);
-  const osHash = pHash([OUTPUT_SECRET_DOMAIN, outputSecret]);
-  const dummyNkHash = pHash([NK_DOMAIN, DUMMY_NK_PREIMAGE]);
+  const ownerNullifierKeyHash = computeOwnerNullifierKeyHash(pHash, ownerNullifierKey);
+  const noteSecretSeedHash = computeNoteSecretSeedHash(pHash, noteSecretSeed);
+  const dummyOwnerNullifierKeyHash = computeOwnerNullifierKeyHash(pHash, DUMMY_NK_PREIMAGE);
   const recipientMatchesOwner = recipientAddress === authorizingAddress;
-  const recipientNkHash =
-    params.recipientNkHash !== undefined
-      ? toBigInt(params.recipientNkHash)
+  const recipientOwnerNullifierKeyHash =
+    params.recipientOwnerNullifierKeyHash !== undefined
+      ? toBigInt(params.recipientOwnerNullifierKeyHash)
       : !requiresRecipientRegistry
         ? 0n
       : recipientMatchesOwner
-        ? nkHash
-        : requiredRecipientField("recipientNkHash", params.mode, recipientAddress);
-  const recipientOsHash =
-    params.recipientOsHash !== undefined
-      ? toBigInt(params.recipientOsHash)
+        ? ownerNullifierKeyHash
+        : requiredRecipientField("recipientOwnerNullifierKeyHash", params.mode, recipientAddress);
+  const recipientNoteSecretSeedHash =
+    params.recipientNoteSecretSeedHash !== undefined
+      ? toBigInt(params.recipientNoteSecretSeedHash)
       : !requiresRecipientRegistry
         ? 0n
       : recipientMatchesOwner
-        ? osHash
-        : requiredRecipientField("recipientOsHash", params.mode, recipientAddress);
+        ? noteSecretSeedHash
+        : requiredRecipientField("recipientNoteSecretSeedHash", params.mode, recipientAddress);
   const empty160 = emptyHashes(160, h2);
   const userSiblings = normalizeSiblingList(params.userSiblings) ?? empty160;
   const recipientSiblings =
@@ -649,8 +655,8 @@ export function buildCommonTxArtifacts(
         : requiredRecipientSiblings(params.mode, recipientAddress));
 
   let feeNoteOwner = 0n;
-  let feeNkHash = 0n;
-  let feeOsHash = 0n;
+  let feeOwnerNullifierKeyHash = 0n;
+  let feeNoteSecretSeedHash = 0n;
   let feeSiblings = empty160;
   if (hasFee) {
     feeNoteOwner = toBigInt(
@@ -660,22 +666,22 @@ export function buildCommonTxArtifacts(
     if (feeNoteOwner === 0n) {
       throw new Error("feeNoteOwner required when feeAmount is nonzero and feeRecipientAddress is zero");
     }
-    feeNkHash =
-      params.feeNkHash !== undefined
-        ? toBigInt(params.feeNkHash)
+    feeOwnerNullifierKeyHash =
+      params.feeOwnerNullifierKeyHash !== undefined
+        ? toBigInt(params.feeOwnerNullifierKeyHash)
         : feeNoteOwner === authorizingAddress
-          ? nkHash
+          ? ownerNullifierKeyHash
           : feeNoteOwner === recipientAddress
-            ? recipientNkHash
-            : requiredFeeField("feeNkHash", feeNoteOwner);
-    feeOsHash =
-      params.feeOsHash !== undefined
-        ? toBigInt(params.feeOsHash)
+            ? recipientOwnerNullifierKeyHash
+            : requiredFeeField("feeOwnerNullifierKeyHash", feeNoteOwner);
+    feeNoteSecretSeedHash =
+      params.feeNoteSecretSeedHash !== undefined
+        ? toBigInt(params.feeNoteSecretSeedHash)
         : feeNoteOwner === authorizingAddress
-          ? osHash
+          ? noteSecretSeedHash
           : feeNoteOwner === recipientAddress
-            ? recipientOsHash
-            : requiredFeeField("feeOsHash", feeNoteOwner);
+            ? recipientNoteSecretSeedHash
+            : requiredFeeField("feeNoteSecretSeedHash", feeNoteOwner);
     feeSiblings =
       normalizeSiblingList(params.feeSiblings) ??
       (feeNoteOwner === authorizingAddress
@@ -685,26 +691,26 @@ export function buildCommonTxArtifacts(
           : requiredFeeSiblings(feeNoteOwner));
   }
 
-  const intentNullifier = computeIntentNullifier(
-    nullifierKey,
+  const transactionReplayId = computeTransactionReplayId(
+    pHash,
+    ownerNullifierKey,
     authorizingAddress,
     executionChainId,
     nonce,
-    pHash,
   );
-  const outRand = [0n, 1n, 2n].map((salt) =>
-    pHash([RANDOMNESS_DOMAIN, outputSecret, intentNullifier, salt]),
+  const noteSecrets = [0n, 1n, 2n].map((outputIndex) =>
+    computeNoteSecret(pHash, noteSecretSeed, transactionReplayId, outputIndex),
   );
 
   let nullifier0: bigint;
   let nullifier1: bigint;
   if (params.mode === "deposit") {
-    nullifier0 = pHash([PHANTOM_DOMAIN, nullifierKey, intentNullifier, 0n]);
-    nullifier1 = pHash([PHANTOM_DOMAIN, nullifierKey, intentNullifier, 1n]);
+    nullifier0 = computePhantomNullifier(pHash, ownerNullifierKey, transactionReplayId, 0n);
+    nullifier1 = computePhantomNullifier(pHash, ownerNullifierKey, transactionReplayId, 1n);
   } else {
-    const inputRandomness = toBigInt(params.inputRandomness);
-    nullifier0 = computeRealNullifier(nullifierKey, inputRandomness, pHash);
-    nullifier1 = pHash([PHANTOM_DOMAIN, nullifierKey, intentNullifier, 1n]);
+    const inputNoteSecret = toBigInt(params.inputNoteSecret);
+    nullifier0 = computeNoteNullifier(pHash, ownerNullifierKey, inputNoteSecret);
+    nullifier1 = computePhantomNullifier(pHash, ownerNullifierKey, transactionReplayId, 1n);
   }
 
   const derivedDepositOriginTag = pHash([
@@ -713,7 +719,7 @@ export function buildCommonTxArtifacts(
     authorizingAddress,
     tokenAddress,
     publicAmountIn,
-    intentNullifier,
+    transactionReplayId,
   ]);
   const propagatedOriginTag =
     params.mode === "deposit" ? 0n : toBigInt(params.inputOriginTag);
@@ -743,24 +749,24 @@ export function buildCommonTxArtifacts(
     note0 = {
       amount,
       ownerAddress: recipientAddress,
-      randomness: outRand[0],
-      nullifierKeyHash: recipientNkHash,
+      noteSecret: noteSecrets[0],
+      ownerNullifierKeyHash: recipientOwnerNullifierKeyHash,
       tokenAddress,
       originTag,
     };
     note1 = {
       amount: 0n,
       ownerAddress: 0n,
-      randomness: outRand[1],
-      nullifierKeyHash: dummyNkHash,
+      noteSecret: noteSecrets[1],
+      ownerNullifierKeyHash: dummyOwnerNullifierKeyHash,
       tokenAddress: 0n,
       originTag: 0n,
     };
     note2 = {
       amount: hasFee ? feeAmount : 0n,
       ownerAddress: hasFee ? feeNoteOwner : 0n,
-      randomness: outRand[2],
-      nullifierKeyHash: hasFee ? feeNkHash : dummyNkHash,
+      noteSecret: noteSecrets[2],
+      ownerNullifierKeyHash: hasFee ? feeOwnerNullifierKeyHash : dummyOwnerNullifierKeyHash,
       tokenAddress: hasFee ? tokenAddress : 0n,
       originTag: hasFee ? originTag : 0n,
     };
@@ -768,8 +774,8 @@ export function buildCommonTxArtifacts(
     note0 = {
       amount,
       ownerAddress: recipientAddress,
-      randomness: outRand[0],
-      nullifierKeyHash: recipientNkHash,
+      noteSecret: noteSecrets[0],
+      ownerNullifierKeyHash: recipientOwnerNullifierKeyHash,
       tokenAddress,
       originTag,
     };
@@ -778,24 +784,24 @@ export function buildCommonTxArtifacts(
         ? {
             amount: changeAmount,
             ownerAddress: authorizingAddress,
-            randomness: outRand[1],
-            nullifierKeyHash: nkHash,
+            noteSecret: noteSecrets[1],
+            ownerNullifierKeyHash: ownerNullifierKeyHash,
             tokenAddress,
             originTag,
           }
         : {
             amount: 0n,
             ownerAddress: 0n,
-            randomness: outRand[1],
-            nullifierKeyHash: dummyNkHash,
+            noteSecret: noteSecrets[1],
+            ownerNullifierKeyHash: dummyOwnerNullifierKeyHash,
             tokenAddress: 0n,
             originTag: 0n,
           };
     note2 = {
       amount: hasFee ? feeAmount : 0n,
       ownerAddress: hasFee ? feeNoteOwner : 0n,
-      randomness: outRand[2],
-      nullifierKeyHash: hasFee ? feeNkHash : dummyNkHash,
+      noteSecret: noteSecrets[2],
+      ownerNullifierKeyHash: hasFee ? feeOwnerNullifierKeyHash : dummyOwnerNullifierKeyHash,
       tokenAddress: hasFee ? tokenAddress : 0n,
       originTag: hasFee ? originTag : 0n,
     };
@@ -805,61 +811,40 @@ export function buildCommonTxArtifacts(
         ? {
             amount: changeAmount,
             ownerAddress: authorizingAddress,
-            randomness: outRand[0],
-            nullifierKeyHash: nkHash,
+            noteSecret: noteSecrets[0],
+            ownerNullifierKeyHash: ownerNullifierKeyHash,
             tokenAddress,
             originTag,
           }
         : {
             amount: 0n,
             ownerAddress: 0n,
-            randomness: outRand[0],
-            nullifierKeyHash: dummyNkHash,
+            noteSecret: noteSecrets[0],
+            ownerNullifierKeyHash: dummyOwnerNullifierKeyHash,
             tokenAddress: 0n,
             originTag: 0n,
           };
     note1 = {
       amount: 0n,
       ownerAddress: 0n,
-      randomness: outRand[1],
-      nullifierKeyHash: dummyNkHash,
+      noteSecret: noteSecrets[1],
+      ownerNullifierKeyHash: dummyOwnerNullifierKeyHash,
       tokenAddress: 0n,
       originTag: 0n,
     };
     note2 = {
       amount: hasFee ? feeAmount : 0n,
       ownerAddress: hasFee ? feeNoteOwner : 0n,
-      randomness: outRand[2],
-      nullifierKeyHash: hasFee ? feeNkHash : dummyNkHash,
+      noteSecret: noteSecrets[2],
+      ownerNullifierKeyHash: hasFee ? feeOwnerNullifierKeyHash : dummyOwnerNullifierKeyHash,
       tokenAddress: hasFee ? tokenAddress : 0n,
       originTag: hasFee ? originTag : 0n,
     };
   }
 
-  const out0 = pHash([
-    note0.amount,
-    note0.ownerAddress,
-    note0.randomness,
-    note0.nullifierKeyHash,
-    note0.tokenAddress,
-    note0.originTag,
-  ]);
-  const out1 = pHash([
-    note1.amount,
-    note1.ownerAddress,
-    note1.randomness,
-    note1.nullifierKeyHash,
-    note1.tokenAddress,
-    note1.originTag,
-  ]);
-  const out2 = pHash([
-    note2.amount,
-    note2.ownerAddress,
-    note2.randomness,
-    note2.nullifierKeyHash,
-    note2.tokenAddress,
-    note2.originTag,
-  ]);
+  const noteCommitment0 = computeNoteCommitment(pHash, note0);
+  const noteCommitment1 = computeNoteCommitment(pHash, note1);
+  const noteCommitment2 = computeNoteCommitment(pHash, note2);
 
   const defaultDeliveryKey = resolveRegisteredDeliveryPubKey(
     params.deliverySchemeId,
@@ -896,9 +881,9 @@ export function buildCommonTxArtifacts(
   const enc0 = encryptNoteData(note0, note0DeliveryKey);
   const enc1 = encryptNoteData(note1, note1DeliveryKey);
   const enc2 = encryptNoteData(note2, feeDeliveryKey);
-  const outputBinding0 = computeOutputBinding(out0, enc0.hash, pHash);
-  const outputBinding1 = computeOutputBinding(out1, enc1.hash, pHash);
-  const outputBinding2 = computeOutputBinding(out2, enc2.hash, pHash);
+  const outputBinding0 = computeNoteBinding(pHash, noteCommitment0, enc0.hash);
+  const outputBinding1 = computeNoteBinding(pHash, noteCommitment1, enc1.hash);
+  const outputBinding2 = computeNoteBinding(pHash, noteCommitment2, enc2.hash);
   const requestedConstraints = normalizeExecutionConstraints({
     executionConstraintsFlags:
       params.executionConstraints?.executionConstraintsFlags === undefined
@@ -938,24 +923,24 @@ export function buildCommonTxArtifacts(
           ? outputBinding2
           : 0n,
   };
-  const intentDigest = computeIntentDigest(
-    {
-      authorizingAddress,
-      policyVersion,
-      operationKind,
-      tokenAddress,
-      recipientAddress,
-      amount,
-      feeRecipientAddress,
-      feeAmount,
-      originMode,
-      nonce,
-      validUntilSeconds,
-      executionChainId,
-      executionConstraints,
-    },
-    pHash,
-  );
+  const transactionIntentDigest = computeTransactionIntentDigest(pHash, {
+    policyVersion,
+    authorizingAddress,
+    operationKind,
+    tokenAddress,
+    recipientAddress,
+    amount,
+    feeRecipientAddress,
+    feeAmount,
+    originMode,
+    executionConstraintsFlags: executionConstraints.executionConstraintsFlags,
+    lockedOutputBinding0: executionConstraints.lockedOutputBinding0,
+    lockedOutputBinding1: executionConstraints.lockedOutputBinding1,
+    lockedOutputBinding2: executionConstraints.lockedOutputBinding2,
+    nonce,
+    validUntilSeconds,
+    executionChainId,
+  });
 
   return {
     mode: params.mode,
@@ -968,49 +953,52 @@ export function buildCommonTxArtifacts(
     feeRecipientAddress,
     feeAmount,
     feeNoteOwner,
-    nullifierKey,
-    outputSecret,
+    ownerNullifierKey,
+    noteSecretSeed,
     policyVersion,
     originMode,
     nonce,
     validUntilSeconds,
     executionChainId,
-    commitmentRoot,
+    noteCommitmentRoot,
     userRegistryRoot,
     authPolicyRoot,
-    nkHash,
-    osHash,
+    ownerNullifierKeyHash,
+    noteSecretSeedHash,
     note0,
     note1,
     note2,
-    out0,
-    out1,
-    out2,
+    noteCommitment0,
+    noteCommitment1,
+    noteCommitment2,
+    out0: noteCommitment0,
+    out1: noteCommitment1,
+    out2: noteCommitment2,
     enc0,
     enc1,
     enc2,
     executionConstraints,
-    intentDigest,
+    transactionIntentDigest,
     outputBinding0,
     outputBinding1,
     outputBinding2,
-    intentNullifier,
+    transactionReplayId,
     nullifier0,
     nullifier1,
     changeAmount,
     inputLeafIndex: params.inputLeafIndex === undefined ? undefined : toBigInt(params.inputLeafIndex),
     inputAmount: params.inputAmount === undefined ? undefined : toBigInt(params.inputAmount),
-    inputRandomness:
-      params.inputRandomness === undefined ? undefined : toBigInt(params.inputRandomness),
+    inputNoteSecret:
+      params.inputNoteSecret === undefined ? undefined : toBigInt(params.inputNoteSecret),
     inputOriginTag: params.inputOriginTag === undefined ? undefined : toBigInt(params.inputOriginTag),
     inputSiblings: normalizeSiblingList(params.inputSiblings) ?? undefined,
     userSiblings,
     recipientSiblings,
-    recipientNkHash,
-    recipientOsHash,
+    recipientOwnerNullifierKeyHash,
+    recipientNoteSecretSeedHash,
     feeSiblings,
-    feeNkHash,
-    feeOsHash,
+    feeOwnerNullifierKeyHash,
+    feeNoteSecretSeedHash,
     authSiblings: normalizeSiblingList(params.authSiblings) ?? empty160,
     empty160,
   };
@@ -1027,8 +1015,8 @@ function encodeNote(note: TransactionNote): Uint8Array {
   const buf = new Uint8Array(192);
   writeUint256Bytes(buf, 0, note.amount);
   writeUint256Bytes(buf, 32, note.ownerAddress);
-  writeUint256Bytes(buf, 64, note.randomness);
-  writeUint256Bytes(buf, 96, note.nullifierKeyHash);
+  writeUint256Bytes(buf, 64, note.noteSecret);
+  writeUint256Bytes(buf, 96, note.ownerNullifierKeyHash);
   writeUint256Bytes(buf, 128, note.tokenAddress);
   writeUint256Bytes(buf, 160, note.originTag);
   return buf;
@@ -1046,6 +1034,41 @@ function noteDataHash(data: Uint8Array): bigint {
   let value = 0n;
   for (const byte of digest) value = (value << 8n) | BigInt(byte);
   return value % FIELD_SIZE;
+}
+
+function foldBinaryHashTree(
+  leaves: bigint[],
+  hash2: (left: bigint, right: bigint) => bigint,
+): bigint {
+  if (leaves.length === 0) {
+    throw new Error("expected at least one leaf");
+  }
+  if (leaves.length === 1) return leaves[0];
+  if (leaves.length === 2) return hash2(leaves[0], leaves[1]);
+
+  let leftSize = 1;
+  while (leftSize * 2 < leaves.length) leftSize *= 2;
+
+  return hash2(
+    foldBinaryHashTree(leaves.slice(0, leftSize), hash2),
+    foldBinaryHashTree(leaves.slice(leftSize), hash2),
+  );
+}
+
+export function computeAuthVkHash(vkWords: bigint[], pHash: PoseidonHelpers["pHash"]): bigint {
+  if (vkWords.length === 0) {
+    throw new Error("expected non-empty inner VK");
+  }
+
+  const leaves: bigint[] = [pHash([AUTH_VK_DOMAIN, BigInt(vkWords.length)])];
+  for (let i = 0; i + 1 < vkWords.length; i += 2) {
+    leaves.push(pHash([vkWords[i], vkWords[i + 1]]));
+  }
+  if (vkWords.length % 2 === 1) {
+    leaves.push(vkWords[vkWords.length - 1]);
+  }
+
+  return foldBinaryHashTree(leaves, (left, right) => pHash([left, right]));
 }
 
 function encryptNoteData(note: TransactionNote, deliveryKey?: string): EncryptedNoteData {
@@ -1085,7 +1108,7 @@ export function buildInnerBaseWitness(common: CommonTxArtifacts): TomlTable {
       validUntilSeconds: common.validUntilSeconds,
       executionChainId: common.executionChainId,
       executionConstraints: common.executionConstraints,
-      intentDigest: common.intentDigest,
+      transactionIntentDigest: common.transactionIntentDigest,
     },
   );
 }
@@ -1109,7 +1132,7 @@ export function buildSingleSigAuthorizationWitness(
 }
 
 export function buildInnerBaseWitnessFromIntent(
-  intent: IntentWitness,
+  intent: TransactionIntentWitness,
 ): TomlTable {
   return {
     intent: {
@@ -1204,19 +1227,19 @@ export function proveOuterTransaction(
   proof: string;
   publicInputs: string[];
   outputNoteData: [string, string, string];
-  note0: { amount: string; randomness: string; originTag: string };
-  note1: { amount: string; randomness: string; originTag: string };
+  note0: { amount: string; noteSecret: string; originTag: string };
+  note1: { amount: string; noteSecret: string; originTag: string };
 } {
   const outerAuthorizingAddress =
     overrides?.authorizingAddress ?? common.authorizingAddress;
   const outerPolicyVersion = overrides?.policyVersion ?? common.policyVersion;
   const outerWitness: TomlTable = {
-    merkle_root: hex(common.commitmentRoot),
+    note_commitment_root: hex(common.noteCommitmentRoot),
     nullifier0_out: hex(common.nullifier0),
     nullifier1_out: hex(common.nullifier1),
-    commitment0_out: hex(common.out0),
-    commitment1_out: hex(common.out1),
-    commitment2_out: hex(common.out2),
+    note_commitment0_out: hex(common.noteCommitment0),
+    note_commitment1_out: hex(common.noteCommitment1),
+    note_commitment2_out: hex(common.noteCommitment2),
     public_amount_in:
       common.mode === "deposit" ? hex(common.publicAmountIn) : "0",
     public_amount_out:
@@ -1229,7 +1252,7 @@ export function proveOuterTransaction(
         : "0",
     depositor_address:
       common.mode === "deposit" ? hex(common.authorizingAddress) : "0",
-    intent_nullifier_out: hex(common.intentNullifier),
+    transaction_replay_id: hex(common.transactionReplayId),
     registry_root: hex(common.userRegistryRoot),
     valid_until_seconds: hex(common.validUntilSeconds),
     execution_chain_id: hex(common.executionChainId),
@@ -1250,11 +1273,11 @@ export function proveOuterTransaction(
     inner_bb_key_hash: inner.innerBbKeyHash,
     authorizing_address: hex(outerAuthorizingAddress),
     auth_data_commitment: hex(authDataCommitment),
-    intent_digest_out: hex(common.intentDigest),
+    transaction_intent_digest: hex(common.transactionIntentDigest),
     policy_version: hex(outerPolicyVersion),
     nonce: hex(common.nonce),
-    nullifier_key: hex(common.nullifierKey),
-    output_secret: hex(common.outputSecret),
+    owner_nullifier_key: hex(common.ownerNullifierKey),
+    note_secret_seed: hex(common.noteSecretSeed),
     execution_constraints_flags: hex(
       common.executionConstraints.executionConstraintsFlags,
     ),
@@ -1262,22 +1285,22 @@ export function proveOuterTransaction(
     locked_output_binding1: hex(common.executionConstraints.lockedOutputBinding1),
     locked_output_binding2: hex(common.executionConstraints.lockedOutputBinding2),
     sender_leaf: {
-      nullifier_key_hash: hex(common.nkHash),
-      output_secret_hash: hex(common.osHash),
+      owner_nullifier_key_hash: hex(common.ownerNullifierKeyHash),
+      note_secret_seed_hash: hex(common.noteSecretSeedHash),
     },
     sender_witness: {
       siblings: common.userSiblings,
     },
     recipient_leaf: {
-      nullifier_key_hash: hex(common.recipientNkHash),
-      output_secret_hash: hex(common.recipientOsHash),
+      owner_nullifier_key_hash: hex(common.recipientOwnerNullifierKeyHash),
+      note_secret_seed_hash: hex(common.recipientNoteSecretSeedHash),
     },
     recipient_witness: {
       siblings: common.recipientSiblings,
     },
     sponsor_leaf: {
-      nullifier_key_hash: hex(common.feeNkHash),
-      output_secret_hash: hex(common.feeOsHash),
+      owner_nullifier_key_hash: hex(common.feeOwnerNullifierKeyHash),
+      note_secret_seed_hash: hex(common.feeNoteSecretSeedHash),
     },
     sponsor_witness: {
       siblings: common.feeSiblings,
@@ -1295,8 +1318,8 @@ export function proveOuterTransaction(
       note: {
         amount: "0",
         owner_address: "0",
-        randomness: "0",
-        nullifier_key_hash: "0",
+        note_secret: "0",
+        owner_nullifier_key_hash: "0",
         token_address: "0",
         origin_tag: "0",
       },
@@ -1307,7 +1330,7 @@ export function proveOuterTransaction(
     if (
       common.inputLeafIndex === undefined ||
       common.inputAmount === undefined ||
-      common.inputRandomness === undefined ||
+      common.inputNoteSecret === undefined ||
       common.inputOriginTag === undefined ||
       !common.inputSiblings
     ) {
@@ -1320,8 +1343,8 @@ export function proveOuterTransaction(
       note: {
         amount: hex(common.inputAmount),
         owner_address: hex(common.authorizingAddress),
-        randomness: hex(common.inputRandomness),
-        nullifier_key_hash: hex(common.nkHash),
+        note_secret: hex(common.inputNoteSecret),
+        owner_nullifier_key_hash: hex(common.ownerNullifierKeyHash),
         token_address: hex(common.tokenAddress),
         origin_tag: hex(common.inputOriginTag),
       },
@@ -1333,8 +1356,8 @@ export function proveOuterTransaction(
       note: {
         amount: "0",
         owner_address: "0",
-        randomness: "0",
-        nullifier_key_hash: "0",
+        note_secret: "0",
+        owner_nullifier_key_hash: "0",
         token_address: "0",
         origin_tag: "0",
       },
@@ -1371,12 +1394,12 @@ export function proveOuterTransaction(
     ],
     note0: {
       amount: hex(common.note0.amount),
-      randomness: hex(common.note0.randomness),
+      noteSecret: hex(common.note0.noteSecret),
       originTag: hex(common.note0.originTag),
     },
     note1: {
       amount: hex(common.note1.amount),
-      randomness: hex(common.note1.randomness),
+      noteSecret: hex(common.note1.noteSecret),
       originTag: hex(common.note1.originTag),
     },
   };

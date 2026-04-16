@@ -9,8 +9,8 @@ import { XWing } from "@noble/post-quantum/hybrid.js";
 import {
   AUTH_POLICY_DOMAIN,
   AUTH_POLICY_KEY_DOMAIN,
-  NK_DOMAIN,
-  OUTPUT_SECRET_DOMAIN,
+  NOTE_SECRET_SEED_DOMAIN,
+  OWNER_NULLIFIER_KEY_HASH_DOMAIN,
   USER_REGISTRY_LEAF_DOMAIN,
   computeAuthVkHash,
   computeSingleSigAuthorizationSigningHash,
@@ -42,8 +42,8 @@ interface UserFixture {
   nk: bigint;
   os: bigint;
   ds: bigint;
-  nkHash: bigint;
-  osHash: bigint;
+  ownerNullifierKeyHash: bigint;
+  noteSecretSeedHash: bigint;
   authDataCommitment: bigint;
   deliveryPubKey: string;
   signingPrivateKey: string;
@@ -161,8 +161,8 @@ function buildUserFixture(
     nk,
     os: osSecret,
     ds,
-    nkHash: helpers.pHash([NK_DOMAIN, nk]),
-    osHash: helpers.pHash([OUTPUT_SECRET_DOMAIN, osSecret]),
+    ownerNullifierKeyHash: helpers.pHash([OWNER_NULLIFIER_KEY_HASH_DOMAIN, nk]),
+    noteSecretSeedHash: helpers.pHash([NOTE_SECRET_SEED_DOMAIN, osSecret]),
     authDataCommitment,
     deliveryPubKey:
       "0x" +
@@ -182,14 +182,14 @@ function buildCases(
   const aliceUserLeaf = helpers.pHash([
     USER_REGISTRY_LEAF_DOMAIN,
     alice.address,
-    alice.nkHash,
-    alice.osHash,
+    alice.ownerNullifierKeyHash,
+    alice.noteSecretSeedHash,
   ]);
   const bobUserLeaf = helpers.pHash([
     USER_REGISTRY_LEAF_DOMAIN,
     bob.address,
-    bob.nkHash,
-    bob.osHash,
+    bob.ownerNullifierKeyHash,
+    bob.noteSecretSeedHash,
   ]);
 
   const aliceRegistry = merkleRootAndSiblings(
@@ -237,13 +237,13 @@ function buildCases(
     depositorAddress: hex(alice.address),
     amount: DEPOSIT_AMOUNT.toString(),
     tokenAddress: "0",
-    nullifierKey: hex(alice.nk),
-    outputSecret: hex(alice.os),
+    ownerNullifierKey: hex(alice.nk),
+    noteSecretSeed: hex(alice.os),
     policyVersion: "1",
     nonce: "42",
     validUntilSeconds: VALID_UNTIL_SECONDS.toString(),
     executionChainId: EXECUTION_CHAIN_ID.toString(),
-    commitmentRoot: hex(emptyRoot(32, helpers)),
+    noteCommitmentRoot: hex(emptyRoot(32, helpers)),
     userRegistryRoot: hex(aliceRegistry.root),
     authPolicyRoot: hex(aliceAuth.root),
     userSiblings: aliceRegistry.siblings,
@@ -257,9 +257,9 @@ function buildCases(
   const depositCommon = buildCommonTxArtifacts(depositParams, helpers);
   const postDepositCommitments = merkleRootAndSiblings(
     [
-      { index: 0n, value: depositCommon.out0 },
-      { index: 1n, value: depositCommon.out1 },
-      { index: 2n, value: depositCommon.out2 },
+      { index: 0n, value: depositCommon.noteCommitment0 },
+      { index: 1n, value: depositCommon.noteCommitment1 },
+      { index: 2n, value: depositCommon.noteCommitment2 },
     ],
     0n,
     32,
@@ -272,25 +272,25 @@ function buildCases(
     recipientAddress: hex(bob.address),
     amount: TRANSFER_AMOUNT.toString(),
     tokenAddress: "0",
-    nullifierKey: hex(alice.nk),
-    outputSecret: hex(alice.os),
+    ownerNullifierKey: hex(alice.nk),
+    noteSecretSeed: hex(alice.os),
     policyVersion: "1",
     nonce: "44",
     validUntilSeconds: VALID_UNTIL_SECONDS.toString(),
     executionChainId: EXECUTION_CHAIN_ID.toString(),
-    commitmentRoot: hex(postDepositCommitments.root),
+    noteCommitmentRoot: hex(postDepositCommitments.root),
     userRegistryRoot: hex(aliceBobRegistryForAlice.root),
     authPolicyRoot: hex(aliceAuth.root),
     inputLeafIndex: "0",
     inputAmount: depositCommon.note0.amount.toString(),
-    inputRandomness: hex(depositCommon.note0.randomness),
+    inputNoteSecret: hex(depositCommon.note0.noteSecret),
     inputOriginTag: hex(depositCommon.note0.originTag),
     inputSiblings: postDepositCommitments.siblings,
     userSiblings: aliceBobRegistryForAlice.siblings,
     recipientSiblings: aliceBobRegistryForBob.siblings,
     authSiblings: aliceAuth.siblings,
-    recipientNkHash: hex(bob.nkHash),
-    recipientOsHash: hex(bob.osHash),
+    recipientOwnerNullifierKeyHash: hex(bob.ownerNullifierKeyHash),
+    recipientNoteSecretSeedHash: hex(bob.noteSecretSeedHash),
     changeAmount: (depositCommon.note0.amount - TRANSFER_AMOUNT).toString(),
     recipientDeliverySchemeId: "1",
     recipientDeliveryPubKey: bob.deliveryPubKey,
@@ -305,18 +305,18 @@ function buildCases(
     recipientAddress: hex(PUBLIC_RECIPIENT),
     amount: WITHDRAW_AMOUNT.toString(),
     tokenAddress: "0",
-    nullifierKey: hex(alice.nk),
-    outputSecret: hex(alice.os),
+    ownerNullifierKey: hex(alice.nk),
+    noteSecretSeed: hex(alice.os),
     policyVersion: "1",
     nonce: "43",
     validUntilSeconds: VALID_UNTIL_SECONDS.toString(),
     executionChainId: EXECUTION_CHAIN_ID.toString(),
-    commitmentRoot: hex(postDepositCommitments.root),
+    noteCommitmentRoot: hex(postDepositCommitments.root),
     userRegistryRoot: hex(aliceRegistry.root),
     authPolicyRoot: hex(aliceAuth.root),
     inputLeafIndex: "0",
     inputAmount: depositCommon.note0.amount.toString(),
-    inputRandomness: hex(depositCommon.note0.randomness),
+    inputNoteSecret: hex(depositCommon.note0.noteSecret),
     inputOriginTag: hex(depositCommon.note0.originTag),
     inputSiblings: postDepositCommitments.siblings,
     userSiblings: aliceRegistry.siblings,
