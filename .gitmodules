@@ -4,6 +4,6 @@
 [submodule "contracts/lib/openzeppelin-contracts"]
 	path = contracts/lib/openzeppelin-contracts
 	url = https://github.com/openzeppelin/openzeppelin-contracts
-[submodule "contracts/lib/poseidon-solidity"]
-	path = contracts/lib/poseidon-solidity
-	url = https://github.com/vimwitch/poseidon-solidity
+[submodule "contracts/lib/poseidon2-evm"]
+	path = contracts/lib/poseidon2-evm
+	url = https://github.com/zemse/poseidon2-evm

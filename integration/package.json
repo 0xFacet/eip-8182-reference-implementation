@@ -16,7 +16,6 @@
     "@noble/post-quantum": "^0.5.4",
     "@noble/secp256k1": "^2.3.0",
     "@noir-lang/noir_js": "1.0.0-beta.19",
-    "circomlibjs": "^0.1.7",
     "viem": "^2.45.0"
   },
   "devDependencies": {

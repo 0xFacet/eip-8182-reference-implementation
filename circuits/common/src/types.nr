@@ -2,7 +2,6 @@ use crate::constants::{AUTH_POLICY_TREE_DEPTH, COMMITMENT_TREE_DEPTH, USER_TREE_
 
 pub struct Note {
     pub amount: Field,
-    pub owner_address: Field,
     pub note_secret: Field,
     pub owner_nullifier_key_hash: Field,
     pub token_address: Field,

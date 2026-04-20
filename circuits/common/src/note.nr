@@ -2,25 +2,53 @@ use crate::constants::{
     DUMMY_OWNER_NULLIFIER_KEY_PREIMAGE,
     ORIGIN_MODE_DEFAULT,
     ORIGIN_MODE_REQUIRE_TAGGED,
-    ORIGIN_TAG_DOMAIN,
-    NOTE_NULLIFIER_DOMAIN,
-    NOTE_SECRET_DOMAIN,
+    NULLIFIER_DOMAIN,
+    TRANSACT_NOTE_SECRET_DOMAIN,
     NOTE_SECRET_SEED_DOMAIN,
+    OWNER_COMMITMENT_DOMAIN,
+    NOTE_BODY_COMMITMENT_DOMAIN,
+    NOTE_COMMITMENT_DOMAIN,
     OWNER_NULLIFIER_KEY_HASH_DOMAIN,
     PHANTOM_NULLIFIER_DOMAIN,
 };
-use crate::hash_utils::{p_hash2, p_hash3, p_hash4, p_hash6};
+use crate::hash_utils::{p_hash2, p_hash3, p_hash4, p_hash5};
 use crate::types::Note;
 
-pub fn note_commitment(note: Note) -> Field {
-    p_hash6([
-        note.amount,
-        note.owner_address,
-        note.note_secret,
-        note.owner_nullifier_key_hash,
-        note.token_address,
-        note.origin_tag,
+// Owner-side note commitment (EIP Section 7.3). Hides owner-identifying fields behind a
+// domain-separated hash so observers can see only the commitment, not its inputs.
+pub fn owner_commitment(owner_nullifier_key_hash: Field, note_secret: Field) -> Field {
+    p_hash3([OWNER_COMMITMENT_DOMAIN, owner_nullifier_key_hash, note_secret])
+}
+
+// Semantic note body commitment (EIP Section 7.4). Input order is normative.
+pub fn note_body_commitment(
+    owner_commitment_value: Field,
+    amount: Field,
+    token_address: Field,
+    origin_tag: Field,
+) -> Field {
+    p_hash5([
+        NOTE_BODY_COMMITMENT_DOMAIN,
+        owner_commitment_value,
+        amount,
+        token_address,
+        origin_tag,
     ])
+}
+
+// Final leaf-sealed note commitment (EIP Section 7.5). `leaf_index` is the tree leaf
+// index assigned at insertion - this is the structural uniqueness source.
+pub fn note_commitment(note_body_commitment_value: Field, leaf_index: Field) -> Field {
+    p_hash3([NOTE_COMMITMENT_DOMAIN, note_body_commitment_value, leaf_index])
+}
+
+// Full three-layer commitment for a note at a known leaf index. Convenience
+// helper for the spend path where the prover knows the input note's leaf index
+// and needs the final commitment to derive the nullifier.
+pub fn full_note_commitment(note: Note, leaf_index: Field) -> Field {
+    let oc = owner_commitment(note.owner_nullifier_key_hash, note.note_secret);
+    let body = note_body_commitment(oc, note.amount, note.token_address, note.origin_tag);
+    note_commitment(body, leaf_index)
 }
 
 pub fn owner_nullifier_key_hash(owner_nullifier_key: Field) -> Field {
@@ -31,41 +59,26 @@ pub fn dummy_owner_nullifier_key_hash() -> Field {
     p_hash2([OWNER_NULLIFIER_KEY_HASH_DOMAIN, DUMMY_OWNER_NULLIFIER_KEY_PREIMAGE])
 }
 
-pub fn note_nullifier(owner_nullifier_key: Field, note_secret: Field) -> Field {
-    p_hash3([NOTE_NULLIFIER_DOMAIN, owner_nullifier_key, note_secret])
+// Real-note nullifier per EIP Section 7.6. Binds to the final (leaf-sealed) note
+// commitment, so the prover MUST witness each input note's leaf index.
+pub fn note_nullifier(note_commitment_value: Field, owner_nullifier_key: Field) -> Field {
+    p_hash3([NULLIFIER_DOMAIN, note_commitment_value, owner_nullifier_key])
 }
 
 pub fn phantom_nullifier(
     owner_nullifier_key: Field,
-    transaction_replay_id: Field,
+    intent_replay_id: Field,
     input_index: Field,
 ) -> Field {
-    p_hash4([PHANTOM_NULLIFIER_DOMAIN, owner_nullifier_key, transaction_replay_id, input_index])
+    p_hash4([PHANTOM_NULLIFIER_DOMAIN, owner_nullifier_key, intent_replay_id, input_index])
 }
 
 pub fn note_secret_seed_hash(note_secret_seed: Field) -> Field {
     p_hash2([NOTE_SECRET_SEED_DOMAIN, note_secret_seed])
 }
 
-pub fn note_secret(note_secret_seed: Field, transaction_replay_id: Field, output_index: Field) -> Field {
-    p_hash4([NOTE_SECRET_DOMAIN, note_secret_seed, transaction_replay_id, output_index])
-}
-
-pub fn deposit_origin_tag(
-    execution_chain_id: Field,
-    depositor_address: Field,
-    token_address: Field,
-    public_amount_in: Field,
-    transaction_replay_id: Field,
-) -> Field {
-    p_hash6([
-        ORIGIN_TAG_DOMAIN,
-        execution_chain_id,
-        depositor_address,
-        token_address,
-        public_amount_in,
-        transaction_replay_id,
-    ])
+pub fn note_secret(note_secret_seed: Field, intent_replay_id: Field, output_index: Field) -> Field {
+    p_hash4([TRANSACT_NOTE_SECRET_DOMAIN, note_secret_seed, intent_replay_id, output_index])
 }
 
 pub fn origin_tag_for_spend(
@@ -87,7 +100,6 @@ pub fn origin_tag_for_spend(
 
 pub fn origin_mode_satisfied(
     origin_mode: Field,
-    is_deposit: bool,
     input0_is_phantom: bool,
     input0_origin_tag: Field,
     input1_is_phantom: bool,
@@ -102,9 +114,7 @@ pub fn origin_mode_satisfied(
     if origin_mode == ORIGIN_MODE_DEFAULT {
         true
     } else if origin_mode == ORIGIN_MODE_REQUIRE_TAGGED {
-        let inputs_ok = if is_deposit {
-            true
-        } else if input0_is_phantom {
+        let inputs_ok = if input0_is_phantom {
             input1_origin_tag != 0
         } else if input1_is_phantom {
             input0_origin_tag != 0
@@ -138,7 +148,6 @@ pub fn origin_mode_satisfied(
 
 pub fn assert_origin_mode_constraints(
     origin_mode: Field,
-    is_deposit: bool,
     input0_is_phantom: bool,
     input0_origin_tag: Field,
     input1_is_phantom: bool,
@@ -153,7 +162,6 @@ pub fn assert_origin_mode_constraints(
     assert(
         origin_mode_satisfied(
             origin_mode,
-            is_deposit,
             input0_is_phantom,
             input0_origin_tag,
             input1_is_phantom,
@@ -170,19 +178,20 @@ pub fn assert_origin_mode_constraints(
 }
 
 #[test]
-fn test_note_commitment_deterministic() {
+fn test_full_note_commitment_deterministic() {
     let note = Note {
         amount: 1000,
-        owner_address: 0x7e5f4552091a69125d5dfcb7b8c2659029395bdf,
         note_secret: note_secret(0xbeef, 0xaaaa, 0),
         owner_nullifier_key_hash: owner_nullifier_key_hash(0x9999),
         token_address: 0x1111,
         origin_tag: 0x5555,
     };
-    let c1 = note_commitment(note);
-    let c2 = note_commitment(note);
+    let c1 = full_note_commitment(note, 7);
+    let c2 = full_note_commitment(note, 7);
     assert(c1 == c2);
     assert(c1 != 0);
+    let c3 = full_note_commitment(note, 8);
+    assert(c3 != c1);
 }
 
 #[test]
@@ -205,17 +214,18 @@ fn test_dummy_owner_nullifier_key_hash() {
 
 #[test]
 fn test_note_nullifier_deterministic() {
-    let n1 = note_nullifier(0x9999, note_secret(0xbeef, 0xaaaa, 0));
-    let n2 = note_nullifier(0x9999, note_secret(0xbeef, 0xaaaa, 0));
+    let note_commitment_value = 0x1234;
+    let n1 = note_nullifier(note_commitment_value, 0x9999);
+    let n2 = note_nullifier(note_commitment_value, 0x9999);
     assert(n1 == n2);
     assert(n1 != 0);
-    let n3 = note_nullifier(0x9999, note_secret(0xbeef, 0xaaaa, 1));
+    let n3 = note_nullifier(0x5678, 0x9999);
     assert(n3 != n1);
 }
 
 #[test]
 fn test_phantom_nullifier_differs_from_real() {
-    let real = note_nullifier(0x9999, note_secret(0xbeef, 0xaaaa, 0));
+    let real = note_nullifier(0x1234, 0x9999);
     let phantom = phantom_nullifier(0x9999, 0xaaaa, 0);
     assert(real != phantom);
 }
@@ -237,14 +247,6 @@ fn test_note_secret_deterministic() {
     assert(r1 == r2);
     let r3 = note_secret(0xbeef, 0xaaaa, 1);
     assert(r3 != r1);
-}
-
-#[test]
-fn test_deposit_origin_tag_deterministic() {
-    let t1 = deposit_origin_tag(1, 0xabc, 0x1111, 1000, 0xffff);
-    let t2 = deposit_origin_tag(1, 0xabc, 0x1111, 1000, 0xffff);
-    assert(t1 == t2);
-    assert(t1 != 0);
 }
 
 #[test]
@@ -272,7 +274,6 @@ fn test_origin_mode_default_allows_cleared_outputs() {
     assert(origin_mode_satisfied(
         ORIGIN_MODE_DEFAULT,
         false,
-        false,
         0x5555,
         false,
         0x6666,
@@ -289,7 +290,6 @@ fn test_origin_mode_default_allows_cleared_outputs() {
 fn test_origin_mode_require_tagged_rejects_mixed_real_inputs() {
     assert(!origin_mode_satisfied(
         ORIGIN_MODE_REQUIRE_TAGGED,
-        false,
         false,
         0x5555,
         false,
@@ -308,7 +308,6 @@ fn test_origin_mode_require_tagged_accepts_shared_nonzero_inputs() {
     assert(origin_mode_satisfied(
         ORIGIN_MODE_REQUIRE_TAGGED,
         false,
-        false,
         0x5555,
         false,
         0x5555,
@@ -326,7 +325,6 @@ fn test_origin_mode_require_tagged_rejects_zero_output_tag() {
     assert(!origin_mode_satisfied(
         ORIGIN_MODE_REQUIRE_TAGGED,
         true,
-        true,
         0,
         true,
         0,
@@ -341,5 +339,5 @@ fn test_origin_mode_require_tagged_rejects_zero_output_tag() {
 
 #[test]
 fn test_origin_mode_rejects_invalid_kind() {
-    assert(!origin_mode_satisfied(2, true, true, 0, true, 0, true, 0, true, 0, true, 0));
+    assert(!origin_mode_satisfied(2, true, 0, true, 0, true, 0, true, 0, true, 0));
 }

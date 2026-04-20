@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {PoseidonT3} from "poseidon-solidity/PoseidonT3.sol";
+import {Poseidon2Sponge} from "./Poseidon2Sponge.sol";
 
 library PoseidonFieldLib {
     uint256 internal constant FIELD_MODULUS =
@@ -21,32 +21,63 @@ library PoseidonFieldLib {
         uint256(keccak256("eip-8182.auth_policy_key")) % FIELD_MODULUS;
     uint256 internal constant USER_REGISTRY_LEAF_DOMAIN =
         uint256(keccak256("eip-8182.user_registry_leaf")) % FIELD_MODULUS;
+    uint256 internal constant OWNER_COMMITMENT_DOMAIN =
+        uint256(keccak256("eip-8182.owner_commitment")) % FIELD_MODULUS;
+    uint256 internal constant NOTE_BODY_COMMITMENT_DOMAIN =
+        uint256(keccak256("eip-8182.note_body_commitment")) % FIELD_MODULUS;
+    uint256 internal constant NOTE_COMMITMENT_DOMAIN =
+        uint256(keccak256("eip-8182.note_commitment")) % FIELD_MODULUS;
+    uint256 internal constant NULLIFIER_DOMAIN =
+        uint256(keccak256("eip-8182.nullifier")) % FIELD_MODULUS;
 
-    function hash2Raw(uint256 left, uint256 right) internal pure returns (uint256 result) {
-        uint256[2] memory input;
-        input[0] = left;
-        input[1] = right;
-        result = PoseidonT3.hash(input);
+    /// @notice Merkle-internal-node hash — length-tagged 2-input sponge form.
+    function merkleHash(uint256 left, uint256 right) internal pure returns (uint256) {
+        return Poseidon2Sponge.hashPair(left, right);
     }
 
-    function poseidon2(uint256 x0, uint256 x1) internal pure returns (uint256) {
-        return hash2Raw(2, hash2Raw(x0, x1));
+    /// @notice Owner-side note commitment per EIP §7.3.
+    function ownerCommitment(uint256 ownerNullifierKeyHash, uint256 noteSecret) internal pure returns (uint256) {
+        return Poseidon2Sponge.hash3(OWNER_COMMITMENT_DOMAIN, ownerNullifierKeyHash, noteSecret);
     }
 
-    function poseidon3(uint256 x0, uint256 x1, uint256 x2) internal pure returns (uint256) {
-        return hash2Raw(3, hash2Raw(hash2Raw(x0, x1), x2));
+    /// @notice Semantic note commitment per EIP §7.4. Input order is normative.
+    function noteBodyCommitment(
+        uint256 ownerCommitmentValue,
+        uint256 amount,
+        uint256 tokenAddress,
+        uint256 originTag
+    ) internal pure returns (uint256) {
+        return Poseidon2Sponge.hash5(
+            NOTE_BODY_COMMITMENT_DOMAIN,
+            ownerCommitmentValue,
+            amount,
+            tokenAddress,
+            originTag
+        );
     }
 
-    function poseidon4(uint256 x0, uint256 x1, uint256 x2, uint256 x3) internal pure returns (uint256) {
-        return hash2Raw(4, hash2Raw(hash2Raw(x0, x1), hash2Raw(x2, x3)));
+    /// @notice Final leaf-sealed note commitment per EIP §7.5.
+    function noteCommitment(uint256 noteBodyCommitmentValue, uint256 leafIndex) internal pure returns (uint256) {
+        return Poseidon2Sponge.hash3(NOTE_COMMITMENT_DOMAIN, noteBodyCommitmentValue, leafIndex);
     }
 
-    function outputBinding(uint256 noteCommitment, uint256 outputNoteDataHash) internal pure returns (uint256) {
-        return poseidon3(OUTPUT_BINDING_DOMAIN, noteCommitment, outputNoteDataHash);
+    function outputBinding(uint256 noteCommitmentValue, uint256 outputNoteDataHash) internal pure returns (uint256) {
+        return Poseidon2Sponge.hash3(OUTPUT_BINDING_DOMAIN, noteCommitmentValue, outputNoteDataHash);
+    }
+
+    /// Deposit origin tag per EIP Section 12.1.
+    function depositOriginTag(
+        uint256 chainId,
+        uint256 sender,
+        uint256 tokenAddress,
+        uint256 amount,
+        uint256 leafIndex
+    ) internal pure returns (uint256) {
+        return Poseidon2Sponge.hash6(ORIGIN_TAG_DOMAIN, chainId, sender, tokenAddress, amount, leafIndex);
     }
 
     function noteSecretSeedHash(uint256 noteSecretSeed) internal pure returns (uint256) {
-        return poseidon2(NOTE_SECRET_SEED_DOMAIN, noteSecretSeed);
+        return Poseidon2Sponge.hashPair(NOTE_SECRET_SEED_DOMAIN, noteSecretSeed);
     }
 
     function userRegistryLeaf(address user, uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHashValue)
@@ -54,18 +85,25 @@ library PoseidonFieldLib {
         pure
         returns (uint256)
     {
-        return poseidon4(USER_REGISTRY_LEAF_DOMAIN, uint256(uint160(user)), ownerNullifierKeyHash, noteSecretSeedHashValue);
+        return Poseidon2Sponge.hash4(
+            USER_REGISTRY_LEAF_DOMAIN,
+            uint256(uint160(user)),
+            ownerNullifierKeyHash,
+            noteSecretSeedHashValue
+        );
     }
 
     function authPolicyLeaf(uint256 authDataCommitment, uint256 policyVersion) internal pure returns (uint256) {
-        return poseidon3(AUTH_POLICY_DOMAIN, authDataCommitment, policyVersion);
+        return Poseidon2Sponge.hash3(AUTH_POLICY_DOMAIN, authDataCommitment, policyVersion);
     }
 
     function authPolicyTreeKey(address user, uint256 innerVkHash) internal pure returns (uint256) {
-        return uint256(uint160(poseidon3(AUTH_POLICY_KEY_DOMAIN, uint256(uint160(user)), innerVkHash)));
+        return uint256(
+            uint160(Poseidon2Sponge.hash3(AUTH_POLICY_KEY_DOMAIN, uint256(uint160(user)), innerVkHash))
+        );
     }
 
     function dummyOwnerNullifierKeyHash() internal pure returns (uint256) {
-        return poseidon2(OWNER_NULLIFIER_KEY_HASH_DOMAIN, 0xdead);
+        return Poseidon2Sponge.hashPair(OWNER_NULLIFIER_KEY_HASH_DOMAIN, 0xdead);
     }
 }

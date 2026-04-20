@@ -34,8 +34,9 @@ import {
   type TomlTable,
   type TxProofParams,
 } from "./tx_proof_shared.ts";
+import { computeFullNoteCommitment } from "./eip8182.ts";
 
-type CaseName = "deposit" | "transfer" | "withdraw";
+type CaseName = "transfer" | "withdraw";
 
 interface UserFixture {
   address: bigint;
@@ -72,11 +73,14 @@ const BOB_NULLIFIER_KEY = 0x7777n;
 const BOB_OUTPUT_SECRET = 0xd00dn;
 const BOB_DELIVERY_SECRET = 0xf00dn;
 const DEPOSIT_AMOUNT = 1_000_000_000_000_000_000n;
+const DEPOSIT_NOTE_SECRET = 0xc0ffeen;
 const TRANSFER_AMOUNT = 350_000_000_000_000_000n;
 const WITHDRAW_AMOUNT = 400_000_000_000_000_000n;
 const EXECUTION_CHAIN_ID = 31337n;
 const VALID_UNTIL_SECONDS = 1_700_000_000n;
 const PUBLIC_RECIPIENT = 0xA11CE00000000000000000000000000000000001n;
+const COMMITMENT_DEPTH = 32;
+const REGISTRY_DEPTH = 160;
 
 async function main() {
   const { json, requestedCase } = parseArgs(process.argv.slice(2));
@@ -127,14 +131,14 @@ function parseArgs(args: string[]): { json: boolean; requestedCase: CaseName | n
     }
     if (arg === "--case") {
       const next = args[index + 1];
-      if (next !== "deposit" && next !== "transfer" && next !== "withdraw") {
-        throw new Error("usage: tsx integration/src/benchmark_eip712_proofs.ts [--json] [--case deposit|transfer|withdraw]");
+      if (next !== "transfer" && next !== "withdraw") {
+        throw new Error("usage: tsx integration/src/benchmark_eip712_proofs.ts [--json] [--case transfer|withdraw]");
       }
       requestedCase = next;
       index += 1;
       continue;
     }
-    throw new Error("usage: tsx integration/src/benchmark_eip712_proofs.ts [--json] [--case deposit|transfer|withdraw]");
+    throw new Error("usage: tsx integration/src/benchmark_eip712_proofs.ts [--json] [--case transfer|withdraw]");
   }
 
   return { json, requestedCase };
@@ -195,7 +199,7 @@ function buildCases(
   const aliceRegistry = merkleRootAndSiblings(
     [{ index: alice.address, value: aliceUserLeaf }],
     alice.address,
-    160,
+    REGISTRY_DEPTH,
     helpers,
   );
   const aliceBobRegistryForAlice = merkleRootAndSiblings(
@@ -204,7 +208,7 @@ function buildCases(
       { index: bob.address, value: bobUserLeaf },
     ],
     alice.address,
-    160,
+    REGISTRY_DEPTH,
     helpers,
   );
   const aliceBobRegistryForBob = merkleRootAndSiblings(
@@ -213,7 +217,7 @@ function buildCases(
       { index: bob.address, value: bobUserLeaf },
     ],
     bob.address,
-    160,
+    REGISTRY_DEPTH,
     helpers,
   );
 
@@ -228,41 +232,26 @@ function buildCases(
   const aliceAuth = merkleRootAndSiblings(
     [{ index: aliceAuthKey, value: aliceAuthLeaf }],
     aliceAuthKey,
-    160,
+    REGISTRY_DEPTH,
     helpers,
   );
 
-  const depositParams: TxProofParams & { signingPrivateKey: string } = {
-    mode: "deposit",
-    depositorAddress: hex(alice.address),
-    amount: DEPOSIT_AMOUNT.toString(),
-    tokenAddress: "0",
-    ownerNullifierKey: hex(alice.nk),
-    noteSecretSeed: hex(alice.os),
-    policyVersion: "1",
-    nonce: "42",
-    validUntilSeconds: VALID_UNTIL_SECONDS.toString(),
-    executionChainId: EXECUTION_CHAIN_ID.toString(),
-    noteCommitmentRoot: hex(emptyRoot(32, helpers)),
-    userRegistryRoot: hex(aliceRegistry.root),
-    authPolicyRoot: hex(aliceAuth.root),
-    userSiblings: aliceRegistry.siblings,
-    recipientSiblings: aliceRegistry.siblings,
-    authSiblings: aliceAuth.siblings,
-    deliverySchemeId: "1",
-    deliveryPubKey: alice.deliveryPubKey,
-    signingPrivateKey: alice.signingPrivateKey,
-  };
-
-  const depositCommon = buildCommonTxArtifacts(depositParams, helpers);
+  // Simulate a contract-native deposit at leaf 0 that the transfer/withdraw
+  // will spend. The deposit note is invented off-chain; the circuit only sees
+  // the resulting commitment and a valid inclusion path.
+  const depositLeafIndex = 0n;
+  const depositCommitment = computeFullNoteCommitment(helpers.pHash, {
+    ownerNullifierKeyHash: alice.ownerNullifierKeyHash,
+    noteSecret: DEPOSIT_NOTE_SECRET,
+    amount: DEPOSIT_AMOUNT,
+    tokenAddress: 0n,
+    originTag: 0n,
+    leafIndex: depositLeafIndex,
+  });
   const postDepositCommitments = merkleRootAndSiblings(
-    [
-      { index: 0n, value: depositCommon.noteCommitment0 },
-      { index: 1n, value: depositCommon.noteCommitment1 },
-      { index: 2n, value: depositCommon.noteCommitment2 },
-    ],
-    0n,
-    32,
+    [{ index: depositLeafIndex, value: depositCommitment }],
+    depositLeafIndex,
+    COMMITMENT_DEPTH,
     helpers,
   );
 
@@ -281,17 +270,17 @@ function buildCases(
     noteCommitmentRoot: hex(postDepositCommitments.root),
     userRegistryRoot: hex(aliceBobRegistryForAlice.root),
     authPolicyRoot: hex(aliceAuth.root),
-    inputLeafIndex: "0",
-    inputAmount: depositCommon.note0.amount.toString(),
-    inputNoteSecret: hex(depositCommon.note0.noteSecret),
-    inputOriginTag: hex(depositCommon.note0.originTag),
+    inputLeafIndex: depositLeafIndex.toString(),
+    inputAmount: DEPOSIT_AMOUNT.toString(),
+    inputNoteSecret: hex(DEPOSIT_NOTE_SECRET),
+    inputOriginTag: "0",
     inputSiblings: postDepositCommitments.siblings,
     userSiblings: aliceBobRegistryForAlice.siblings,
     recipientSiblings: aliceBobRegistryForBob.siblings,
     authSiblings: aliceAuth.siblings,
     recipientOwnerNullifierKeyHash: hex(bob.ownerNullifierKeyHash),
     recipientNoteSecretSeedHash: hex(bob.noteSecretSeedHash),
-    changeAmount: (depositCommon.note0.amount - TRANSFER_AMOUNT).toString(),
+    changeAmount: (DEPOSIT_AMOUNT - TRANSFER_AMOUNT).toString(),
     recipientDeliverySchemeId: "1",
     recipientDeliveryPubKey: bob.deliveryPubKey,
     changeDeliverySchemeId: "1",
@@ -314,20 +303,20 @@ function buildCases(
     noteCommitmentRoot: hex(postDepositCommitments.root),
     userRegistryRoot: hex(aliceRegistry.root),
     authPolicyRoot: hex(aliceAuth.root),
-    inputLeafIndex: "0",
-    inputAmount: depositCommon.note0.amount.toString(),
-    inputNoteSecret: hex(depositCommon.note0.noteSecret),
-    inputOriginTag: hex(depositCommon.note0.originTag),
+    inputLeafIndex: depositLeafIndex.toString(),
+    inputAmount: DEPOSIT_AMOUNT.toString(),
+    inputNoteSecret: hex(DEPOSIT_NOTE_SECRET),
+    inputOriginTag: "0",
     inputSiblings: postDepositCommitments.siblings,
     userSiblings: aliceRegistry.siblings,
     authSiblings: aliceAuth.siblings,
+    changeAmount: (DEPOSIT_AMOUNT - WITHDRAW_AMOUNT).toString(),
     deliverySchemeId: "1",
     deliveryPubKey: alice.deliveryPubKey,
     signingPrivateKey: alice.signingPrivateKey,
   };
 
   return [
-    { name: "deposit", params: depositParams },
     { name: "transfer", params: transferParams },
     { name: "withdraw", params: withdrawParams },
   ];
@@ -416,14 +405,6 @@ function computeInnerVkHash(packageName: string, helpers: PoseidonHelpers): bigi
     BigInt(`0x${vkBytes.slice(index * 32, (index + 1) * 32).toString("hex")}`),
   );
   return computeAuthVkHash(vkWords, helpers.pHash);
-}
-
-function emptyRoot(depth: number, helpers: PoseidonHelpers): bigint {
-  let current = 0n;
-  for (let level = 0; level < depth; level += 1) {
-    current = helpers.h2(current, current);
-  }
-  return current;
 }
 
 function merkleRootAndSiblings(

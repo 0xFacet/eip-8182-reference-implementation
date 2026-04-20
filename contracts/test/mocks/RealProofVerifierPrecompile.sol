@@ -35,26 +35,24 @@ contract RealProofVerifierPrecompile {
             return bytes("");
         }
 
-        bytes32[] memory verifierPublicInputs = new bytes32[](19);
+        bytes32[] memory verifierPublicInputs = new bytes32[](17);
         verifierPublicInputs[0] = bytes32(publicInputs.noteCommitmentRoot);
         verifierPublicInputs[1] = bytes32(publicInputs.nullifier0);
         verifierPublicInputs[2] = bytes32(publicInputs.nullifier1);
-        verifierPublicInputs[3] = bytes32(publicInputs.noteCommitment0);
-        verifierPublicInputs[4] = bytes32(publicInputs.noteCommitment1);
-        verifierPublicInputs[5] = bytes32(publicInputs.noteCommitment2);
-        verifierPublicInputs[6] = bytes32(publicInputs.publicAmountIn);
-        verifierPublicInputs[7] = bytes32(publicInputs.publicAmountOut);
-        verifierPublicInputs[8] = bytes32(publicInputs.publicRecipientAddress);
-        verifierPublicInputs[9] = bytes32(publicInputs.publicTokenAddress);
-        verifierPublicInputs[10] = bytes32(publicInputs.depositorAddress);
-        verifierPublicInputs[11] = bytes32(publicInputs.transactionReplayId);
-        verifierPublicInputs[12] = bytes32(publicInputs.registryRoot);
-        verifierPublicInputs[13] = bytes32(publicInputs.validUntilSeconds);
-        verifierPublicInputs[14] = bytes32(publicInputs.executionChainId);
-        verifierPublicInputs[15] = bytes32(publicInputs.authPolicyRegistryRoot);
-        verifierPublicInputs[16] = bytes32(publicInputs.outputNoteDataHash0);
-        verifierPublicInputs[17] = bytes32(publicInputs.outputNoteDataHash1);
-        verifierPublicInputs[18] = bytes32(publicInputs.outputNoteDataHash2);
+        verifierPublicInputs[3] = bytes32(publicInputs.noteBodyCommitment0);
+        verifierPublicInputs[4] = bytes32(publicInputs.noteBodyCommitment1);
+        verifierPublicInputs[5] = bytes32(publicInputs.noteBodyCommitment2);
+        verifierPublicInputs[6] = bytes32(publicInputs.publicAmountOut);
+        verifierPublicInputs[7] = bytes32(publicInputs.publicRecipientAddress);
+        verifierPublicInputs[8] = bytes32(publicInputs.publicTokenAddress);
+        verifierPublicInputs[9] = bytes32(publicInputs.intentReplayId);
+        verifierPublicInputs[10] = bytes32(publicInputs.registryRoot);
+        verifierPublicInputs[11] = bytes32(publicInputs.validUntilSeconds);
+        verifierPublicInputs[12] = bytes32(publicInputs.executionChainId);
+        verifierPublicInputs[13] = bytes32(publicInputs.authPolicyRegistryRoot);
+        verifierPublicInputs[14] = bytes32(publicInputs.outputNoteDataHash0);
+        verifierPublicInputs[15] = bytes32(publicInputs.outputNoteDataHash1);
+        verifierPublicInputs[16] = bytes32(publicInputs.outputNoteDataHash2);
 
         (bool success, bytes memory returnData) = address(verifier).staticcall(
             abi.encodeCall(IHonkVerifier.verify, (proof, verifierPublicInputs))

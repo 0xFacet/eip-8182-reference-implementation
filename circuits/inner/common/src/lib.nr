@@ -5,7 +5,6 @@ pub mod secp256k1;
 pub mod single_sig;
 use keccak256::keccak256;
 use privacy_pool_common::constants::{
-    DEPOSIT_OP,
     LOCK_OUTPUT_BINDING_0,
     LOCK_OUTPUT_BINDING_1,
     LOCK_OUTPUT_BINDING_2,
@@ -302,10 +301,7 @@ pub fn fold_fields<let N: u32>(seed: Field, fields: [Field; N]) -> Field {
 
 pub fn assert_valid_operation_kind(operation_kind: Field) {
     assert(
-        (operation_kind - TRANSFER_OP)
-            * (operation_kind - WITHDRAWAL_OP)
-            * (operation_kind - DEPOSIT_OP)
-            == 0,
+        (operation_kind - TRANSFER_OP) * (operation_kind - WITHDRAWAL_OP) == 0,
         "invalid operation kind",
     );
 }
@@ -367,7 +363,7 @@ fn sample_validated_intent(origin_mode: Field) -> ValidatedIntent {
     Intent {
         authorizing_address: 0x7e5f4552091a69125d5dfcb7b8c2659029395bdf,
         policy_version: 1,
-        operation_kind: DEPOSIT_OP,
+        operation_kind: TRANSFER_OP,
         token_address: 0,
         recipient_address: 0x1000000000000000000000000000000000000001,
         amount: 1000,
@@ -417,10 +413,10 @@ fn test_eip712_signing_hash_matches_expected_sample() {
         eip712_context(0x73696e676c655f61757468, default_eip712_verifying_contract()),
     );
     let expected: [u8; 32] = [
-        0x59, 0x7f, 0x1f, 0xfc, 0xb6, 0x75, 0x82, 0xe1,
-        0x7d, 0xf9, 0x19, 0xaf, 0x5b, 0x16, 0x04, 0xf0,
-        0x51, 0xb9, 0x14, 0x68, 0x2f, 0xea, 0x46, 0xa1,
-        0x79, 0x6d, 0x39, 0x6c, 0x27, 0xb4, 0x54, 0x47,
+        0x11, 0xa4, 0x08, 0xe6, 0x73, 0x2d, 0xf6, 0xe2,
+        0x8d, 0xed, 0x79, 0x9c, 0x5c, 0xb8, 0xd8, 0x5f,
+        0x8e, 0xd7, 0xbc, 0x90, 0x10, 0xbb, 0x5d, 0xa7,
+        0x38, 0xed, 0xaa, 0x0b, 0x64, 0xf9, 0x10, 0xa5,
     ];
 
     for i in 0..32 {
@@ -434,7 +430,7 @@ fn test_transaction_intent_digest_changes_with_execution_constraints() {
     let digest1 = Intent {
         authorizing_address: 0x7e5f4552091a69125d5dfcb7b8c2659029395bdf,
         policy_version: 1,
-        operation_kind: DEPOSIT_OP,
+        operation_kind: TRANSFER_OP,
         token_address: 0,
         recipient_address: 0x1000000000000000000000000000000000000001,
         amount: 1000,

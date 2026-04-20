@@ -6,7 +6,11 @@ import cors from '@fastify/cors';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { buildPoseidon } from 'circomlibjs';
+import {
+  initPoseidon2,
+  poseidon2Hash,
+  poseidon2HashPair,
+} from '../../integration/src/poseidon2.ts';
 import * as secp from '@noble/secp256k1';
 import { keccak_256 } from '@noble/hashes/sha3';
 import { XWing } from '@noble/post-quantum/hybrid.js';
@@ -14,7 +18,7 @@ import { ethers } from 'ethers';
 import {
   AUTH_POLICY_KEY_DOMAIN,
   DELIVERY_SCHEME_X_WING,
-  DEPOSIT_OPERATION_KIND,
+  TRANSFER_OPERATION_KIND,
   bytesToHex,
   compactSignatureBytes,
   computeSingleSigAuthorizationSigningHash,
@@ -42,6 +46,7 @@ import {
   replayShieldedPoolTransactsIntoNoteStore,
 } from './note_delivery.ts';
 import {
+  computeFinalNoteCommitment,
   computeNoteSecretSeedHash,
   computeOwnerNullifierKeyHash,
 } from '../../integration/src/eip8182.ts';
@@ -67,7 +72,6 @@ let poolStorageLayout: PoolStorageLayout | null = null;
 
 // ==================== Poseidon ====================
 
-let poseidon: any;
 let h2: (a: bigint, b: bigint) => bigint;
 let pHash: (vals: bigint[]) => bigint;
 
@@ -148,7 +152,7 @@ interface BaseProofRequest {
   tokenAddress?: string;
   feeRecipientAddress?: string;
   feeAmount?: string;
-  feeNoteOwner?: string;
+  feeNoteRecipientAddress?: string;
   ownerNullifierKey: string;
   noteSecretSeed: string;
   policyVersion?: string;
@@ -158,11 +162,6 @@ interface BaseProofRequest {
   executionChainId: string;
   executionConstraints?: ExecutionConstraintsRequest;
   signature: string;
-}
-
-interface DepositProofRequest extends BaseProofRequest {
-  depositorAddress: string;
-  recipientAddress?: string;
 }
 
 interface TransferProofRequest extends BaseProofRequest {
@@ -188,18 +187,9 @@ let innerVkHashCache: bigint | null = null;
 // ==================== Init ====================
 
 async function initPoseidon() {
-  poseidon = await buildPoseidon();
-  h2 = (a: bigint, b: bigint): bigint => BigInt(poseidon.F.toString(poseidon([a, b])));
-  const rawHash = (vals: bigint[]): bigint => {
-    if (vals.length === 1) return vals[0];
-    if (vals.length === 2) return h2(vals[0], vals[1]);
-    let ls = 1; while (ls * 2 < vals.length) ls *= 2;
-    return h2(rawHash(vals.slice(0, ls)), rawHash(vals.slice(ls)));
-  };
-  pHash = (vals: bigint[]): bigint => {
-    if (vals.length === 1) return vals[0];
-    return h2(BigInt(vals.length), rawHash(vals));
-  };
+  await initPoseidon2();
+  h2 = (a: bigint, b: bigint): bigint => poseidon2HashPair(a, b);
+  pHash = (vals: bigint[]): bigint => poseidon2Hash(vals);
 
   let emp = 0n;
   for (let i = 0; i < PROTOCOL_REGISTRY_TREE_DEPTH; i++) { userEmptyHashes.push(hex(emp)); emp = h2(emp, emp); }
@@ -240,7 +230,7 @@ function loadPoolStorageLayout(): PoolStorageLayout {
 // ==================== Chain Sync ====================
 
 const POOL_ABI = [
-  'event ShieldedPoolTransact(uint256 indexed nullifier0, uint256 indexed nullifier1, uint256 indexed transactionReplayId, uint256 noteCommitment0, uint256 noteCommitment1, uint256 noteCommitment2, uint256 leafIndex0, uint256 postInsertionRoot, bytes outputNoteData0, bytes outputNoteData1, bytes outputNoteData2)',
+  'event ShieldedPoolTransact(uint256 indexed nullifier0, uint256 indexed nullifier1, uint256 indexed intentReplayId, uint256 noteCommitment0, uint256 noteCommitment1, uint256 noteCommitment2, uint256 leafIndex0, uint256 postInsertionRoot, bytes outputNoteData0, bytes outputNoteData1, bytes outputNoteData2)',
   'event UserRegistered(address indexed user, uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHash)',
   'event DeliveryKeySet(address indexed user, uint32 indexed schemeId, bytes keyBytes)',
   'function getCurrentRoots() view returns (uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot)',
@@ -317,7 +307,7 @@ async function syncFromChain() {
         leafIndex0,
         nullifier0: hex(BigInt(ev.args!.nullifier0.toString())),
         nullifier1: hex(BigInt(ev.args!.nullifier1.toString())),
-        transactionReplayId: hex(BigInt(ev.args!.transactionReplayId.toString())),
+        intentReplayId: hex(BigInt(ev.args!.intentReplayId.toString())),
         noteCommitment0: hex(commitments[0]),
         noteCommitment1: hex(commitments[1]),
         noteCommitment2: hex(commitments[2]),
@@ -410,25 +400,28 @@ function deliveryKeyHex(key: Uint8Array | null): string | undefined {
 }
 
 function addNonDummyOutputNotes(common: ReturnType<typeof buildCommonTxArtifacts>) {
-  const notes = [
-    { note: common.note0, commitment: common.out0 },
-    { note: common.note1, commitment: common.out1 },
-    { note: common.note2, commitment: common.out2 },
+  // `common.out*` are body commitments; the contract seals them with the
+  // assigned leaf index. The local note store stores final sealed commitments.
+  const items = [
+    { note: common.note0, body: common.out0 },
+    { note: common.note1, body: common.out1 },
+    { note: common.note2, body: common.out2 },
   ];
-  for (const { note, commitment } of notes) {
+  for (const { note, body } of items) {
+    const leafIndex = commitmentTree.nextIndex;
+    const finalCommitment = computeFinalNoteCommitment(pHash, body, BigInt(leafIndex));
     if (note.amount !== 0n) {
       noteStore.addNote({
-        commitment: hex(commitment),
-        leafIndex: commitmentTree.nextIndex,
+        commitment: hex(finalCommitment),
+        leafIndex,
         amount: note.amount.toString(),
-        ownerAddress: hex(note.ownerAddress),
         noteSecret: hex(note.noteSecret),
         ownerNullifierKeyHash: hex(note.ownerNullifierKeyHash),
         tokenAddress: hex(note.tokenAddress),
         originTag: hex(note.originTag),
       });
     }
-    commitmentTree.insert(commitment);
+    commitmentTree.insert(finalCommitment);
   }
 }
 
@@ -488,7 +481,7 @@ async function getInnerVkHash(): Promise<bigint> {
   console.log(`Generating inner VK${innerVkHashCache ? ' (refresh)' : ' (first run)'}...`);
   const ownerAddress = 0x7e5f4552091a69125d5dfcb7b8c2659029395bdfn;
   const policyVersion = 1n;
-  const operationKind = DEPOSIT_OPERATION_KIND;
+  const operationKind = TRANSFER_OPERATION_KIND;
   const tokenAddress = 0n;
   const recipientAddress = ownerAddress;
   const amount = 1n;
@@ -662,7 +655,7 @@ app.get('/notes/:address', async (request) => {
   const { address } = request.params as { address: string };
   const { ownerNullifierKey, deliverySecret } = request.query as { ownerNullifierKey?: string; deliverySecret?: string };
   if (!ownerNullifierKey || !deliverySecret) return { error: 'ownerNullifierKey and deliverySecret query params required' };
-  const notes = await noteStore.getUnspentNotes(BigInt(address), BigInt(ownerNullifierKey), BigInt(deliverySecret));
+  const notes = await noteStore.getUnspentNotes(BigInt(ownerNullifierKey), BigInt(deliverySecret));
   const balances: Record<string, bigint> = {};
   for (const n of notes) {
     const tok = n.tokenAddress;
@@ -674,109 +667,8 @@ app.get('/notes/:address', async (request) => {
   };
 });
 
-// ==================== POST /prove/deposit ====================
-
-app.post('/prove/deposit', async (request, reply) => {
-  const params = request.body as DepositProofRequest;
-  try {
-    const startTime = Date.now();
-    console.log('=== Deposit proof request ===');
-
-    const depositorAddress = BigInt(params.depositorAddress);
-    const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-    const recipientAddress =
-      params.recipientAddress === undefined ? depositorAddress : BigInt(params.recipientAddress);
-    const feeAmount = BigInt(params.feeAmount ?? '0');
-    const feeNoteOwner = BigInt(params.feeNoteOwner ?? params.feeRecipientAddress ?? '0');
-
-    console.log('Reading chain state for deposit proof...');
-    const state = await readContractState(provider, depositorAddress);
-    const senderDeliveryKey = await getDeliveryPubKey(provider, depositorAddress);
-
-    let recipientEntry: UserRegistryEntry | null = null;
-    let recipientSiblings = state.userSiblings;
-    let recipientDeliveryKey = senderDeliveryKey;
-    if (recipientAddress !== depositorAddress) {
-      recipientEntry = await getUserRegistryEntryCachedOrChain(provider, recipientAddress);
-      recipientSiblings = await readTreeSiblings(
-        provider,
-        POOL_ADDRESS,
-        loadPoolStorageLayout().userTreeNodesSlot,
-        recipientAddress & ((1n << 160n) - 1n),
-        PROTOCOL_REGISTRY_TREE_DEPTH,
-        userEmptyHashes,
-      );
-      recipientDeliveryKey = await getDeliveryPubKey(provider, recipientAddress);
-    }
-
-    let feeEntry: UserRegistryEntry | null = null;
-    let feeSiblings: string[] | undefined;
-    let feeDeliveryKey: Uint8Array | null | undefined;
-    if (feeAmount !== 0n && feeNoteOwner !== 0n && feeNoteOwner !== depositorAddress && feeNoteOwner !== recipientAddress) {
-      feeEntry = await getUserRegistryEntryCachedOrChain(provider, feeNoteOwner);
-      feeSiblings = await readTreeSiblings(
-        provider,
-        POOL_ADDRESS,
-        loadPoolStorageLayout().userTreeNodesSlot,
-        feeNoteOwner & ((1n << 160n) - 1n),
-        PROTOCOL_REGISTRY_TREE_DEPTH,
-        userEmptyHashes,
-      );
-      feeDeliveryKey = await getDeliveryPubKey(provider, feeNoteOwner);
-    }
-
-    const proofParams: TxProofParams = {
-      mode: 'deposit',
-      depositorAddress: normalizeAddress(depositorAddress),
-      recipientAddress: normalizeAddress(recipientAddress),
-      amount: params.amount,
-      tokenAddress: params.tokenAddress ?? '0',
-      feeRecipientAddress: params.feeRecipientAddress,
-      feeAmount: params.feeAmount,
-      feeNoteOwner: params.feeNoteOwner,
-      ownerNullifierKey: params.ownerNullifierKey,
-      noteSecretSeed: params.noteSecretSeed,
-      policyVersion: params.policyVersion ?? '1',
-      originMode: params.originMode,
-      nonce: params.nonce,
-      validUntilSeconds: params.validUntilSeconds,
-      executionChainId: params.executionChainId,
-      noteCommitmentRoot: hex(state.noteCommitmentRoot),
-      userRegistryRoot: hex(state.userRegRoot),
-      authPolicyRoot: hex(state.authPolicyRoot),
-      userSiblings: state.userSiblings,
-      recipientSiblings,
-      authSiblings: state.authSiblings,
-      recipientOwnerNullifierKeyHash: recipientEntry?.ownerNullifierKeyHash,
-      recipientNoteSecretSeedHash: recipientEntry?.noteSecretSeedHash,
-      feeOwnerNullifierKeyHash: feeEntry?.ownerNullifierKeyHash,
-      feeNoteSecretSeedHash: feeEntry?.noteSecretSeedHash,
-      feeSiblings,
-      deliverySchemeId: senderDeliveryKey ? DELIVERY_SCHEME_X_WING.toString() : undefined,
-      deliveryPubKey: deliveryKeyHex(senderDeliveryKey),
-      recipientDeliverySchemeId: recipientDeliveryKey ? DELIVERY_SCHEME_X_WING.toString() : undefined,
-      recipientDeliveryPubKey: deliveryKeyHex(recipientDeliveryKey),
-      feeDeliverySchemeId: feeDeliveryKey ? DELIVERY_SCHEME_X_WING.toString() : undefined,
-      feeDeliveryPubKey: deliveryKeyHex(feeDeliveryKey ?? null),
-      executionConstraints: params.executionConstraints,
-    };
-
-    const result = await withCircuitLock(async () => {
-      const common = buildCommonTxArtifacts(proofParams, { h2, pHash });
-      const proofResult = proveSingleSigTransaction(common, params.signature);
-      addNonDummyOutputNotes(common);
-      return proofResult;
-    });
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`Deposit proof generated in ${elapsed}s`);
-    return { ...result, provingTime: elapsed };
-  } catch (e: any) {
-    console.error('Prove error:', e.stderr?.toString()?.slice(0, 500) || e.message);
-    reply.code(500);
-    return { error: e.message?.slice(0, 500) };
-  }
-});
+// Deposits are contract-native in EIP-8182 Section 5.3 and do not involve the
+// outer proof. Callers should call pool.deposit() directly.
 
 // ==================== POST /prove/transfer ====================
 
@@ -793,10 +685,10 @@ app.post('/prove/transfer', async (request, reply) => {
     const ownerNullifierKey = BigInt(params.ownerNullifierKey);
     const deliverySecret = BigInt(params.deliverySecret);
     const feeAmount = BigInt(params.feeAmount ?? '0');
-    const feeNoteOwner = BigInt(params.feeNoteOwner ?? params.feeRecipientAddress ?? '0');
+    const feeNoteRecipientAddress = BigInt(params.feeNoteRecipientAddress ?? params.feeRecipientAddress ?? '0');
 
     // Find unspent note with sufficient balance
-    const unspent = await noteStore.getUnspentNotes(senderAddress, ownerNullifierKey, deliverySecret);
+    const unspent = await noteStore.getUnspentNotes(ownerNullifierKey, deliverySecret);
     const note = unspent.find(
       n => BigInt(n.amount) >= amount + feeAmount && n.tokenAddress === hex(tokenAddress),
     );
@@ -829,17 +721,17 @@ app.post('/prove/transfer', async (request, reply) => {
     let feeEntry: UserRegistryEntry | null = null;
     let feeSiblings: string[] | undefined;
     let feeDeliveryKey: Uint8Array | null | undefined;
-    if (feeAmount !== 0n && feeNoteOwner !== 0n && feeNoteOwner !== senderAddress && feeNoteOwner !== recipientAddress) {
-      feeEntry = await getUserRegistryEntryCachedOrChain(provider, feeNoteOwner);
+    if (feeAmount !== 0n && feeNoteRecipientAddress !== 0n && feeNoteRecipientAddress !== senderAddress && feeNoteRecipientAddress !== recipientAddress) {
+      feeEntry = await getUserRegistryEntryCachedOrChain(provider, feeNoteRecipientAddress);
       feeSiblings = await readTreeSiblings(
         provider,
         POOL_ADDRESS,
         loadPoolStorageLayout().userTreeNodesSlot,
-        feeNoteOwner & ((1n << 160n) - 1n),
+        feeNoteRecipientAddress & ((1n << 160n) - 1n),
         PROTOCOL_REGISTRY_TREE_DEPTH,
         userEmptyHashes
       );
-      feeDeliveryKey = await getDeliveryPubKey(provider, feeNoteOwner);
+      feeDeliveryKey = await getDeliveryPubKey(provider, feeNoteRecipientAddress);
     }
 
     const proofParams: TxProofParams = {
@@ -850,7 +742,7 @@ app.post('/prove/transfer', async (request, reply) => {
       tokenAddress: params.tokenAddress ?? '0',
       feeRecipientAddress: params.feeRecipientAddress,
       feeAmount: params.feeAmount,
-      feeNoteOwner: params.feeNoteOwner,
+      feeNoteRecipientAddress: params.feeNoteRecipientAddress,
       ownerNullifierKey: params.ownerNullifierKey,
       noteSecretSeed: params.noteSecretSeed,
       policyVersion: params.policyVersion ?? '1',
@@ -920,11 +812,11 @@ app.post('/prove/withdraw', async (request, reply) => {
     const noteSecretSeed = BigInt(params.noteSecretSeed);
     const deliverySecret = BigInt(params.deliverySecret);
     const feeAmount = BigInt(params.feeAmount ?? '0');
-    const feeNoteOwner = BigInt(params.feeNoteOwner ?? params.feeRecipientAddress ?? '0');
+    const feeNoteRecipientAddress = BigInt(params.feeNoteRecipientAddress ?? params.feeRecipientAddress ?? '0');
     const senderOwnerNullifierKeyHash = computeOwnerNullifierKeyHash(pHash, ownerNullifierKey);
     const senderNoteSecretSeedHash = computeNoteSecretSeedHash(pHash, noteSecretSeed);
 
-    const unspent = await noteStore.getUnspentNotes(senderAddress, ownerNullifierKey, deliverySecret);
+    const unspent = await noteStore.getUnspentNotes(ownerNullifierKey, deliverySecret);
     const note = unspent.find(
       n => BigInt(n.amount) >= amount + feeAmount && n.tokenAddress === hex(tokenAddress),
     );
@@ -939,17 +831,17 @@ app.post('/prove/withdraw', async (request, reply) => {
     let feeEntry: UserRegistryEntry | null = null;
     let feeSiblings: string[] | undefined;
     let feeDeliveryKey: Uint8Array | null | undefined;
-    if (feeAmount !== 0n && feeNoteOwner !== 0n && feeNoteOwner !== senderAddress) {
-      feeEntry = await getUserRegistryEntryCachedOrChain(provider, feeNoteOwner);
+    if (feeAmount !== 0n && feeNoteRecipientAddress !== 0n && feeNoteRecipientAddress !== senderAddress) {
+      feeEntry = await getUserRegistryEntryCachedOrChain(provider, feeNoteRecipientAddress);
       feeSiblings = await readTreeSiblings(
         provider,
         POOL_ADDRESS,
         loadPoolStorageLayout().userTreeNodesSlot,
-        feeNoteOwner & ((1n << 160n) - 1n),
+        feeNoteRecipientAddress & ((1n << 160n) - 1n),
         PROTOCOL_REGISTRY_TREE_DEPTH,
         userEmptyHashes
       );
-      feeDeliveryKey = await getDeliveryPubKey(provider, feeNoteOwner);
+      feeDeliveryKey = await getDeliveryPubKey(provider, feeNoteRecipientAddress);
     }
 
     const proofParams: TxProofParams = {
@@ -960,7 +852,7 @@ app.post('/prove/withdraw', async (request, reply) => {
       tokenAddress: params.tokenAddress ?? '0',
       feeRecipientAddress: params.feeRecipientAddress,
       feeAmount: params.feeAmount,
-      feeNoteOwner: params.feeNoteOwner,
+      feeNoteRecipientAddress: params.feeNoteRecipientAddress,
       ownerNullifierKey: params.ownerNullifierKey,
       noteSecretSeed: params.noteSecretSeed,
       policyVersion: params.policyVersion ?? '1',

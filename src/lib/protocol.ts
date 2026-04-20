@@ -2,10 +2,14 @@ import { keccak_256 } from '@noble/hashes/sha3'
 import {
   AUTH_VK_DOMAIN,
   FIELD_MODULUS,
-  NOTE_NULLIFIER_DOMAIN,
+  NOTE_BODY_COMMITMENT_DOMAIN,
+  NOTE_COMMITMENT_DOMAIN,
+  NULLIFIER_DOMAIN,
+  ORIGIN_TAG_DOMAIN,
   OUTPUT_BINDING_DOMAIN,
+  OWNER_COMMITMENT_DOMAIN,
   TRANSACTION_INTENT_DIGEST_DOMAIN,
-  TRANSACTION_REPLAY_ID_DOMAIN,
+  INTENT_REPLAY_ID_DOMAIN,
 } from './domainConstants.ts'
 
 export {
@@ -13,15 +17,18 @@ export {
   AUTH_POLICY_KEY_DOMAIN,
   AUTH_VK_DOMAIN,
   FIELD_MODULUS,
-  NOTE_NULLIFIER_DOMAIN,
-  NOTE_SECRET_DOMAIN,
+  NOTE_BODY_COMMITMENT_DOMAIN,
+  NOTE_COMMITMENT_DOMAIN,
+  NULLIFIER_DOMAIN,
+  TRANSACT_NOTE_SECRET_DOMAIN,
   NOTE_SECRET_SEED_DOMAIN,
   ORIGIN_TAG_DOMAIN,
+  OWNER_COMMITMENT_DOMAIN,
   OWNER_NULLIFIER_KEY_HASH_DOMAIN,
   OUTPUT_BINDING_DOMAIN,
   PHANTOM_NULLIFIER_DOMAIN,
   TRANSACTION_INTENT_DIGEST_DOMAIN,
-  TRANSACTION_REPLAY_ID_DOMAIN,
+  INTENT_REPLAY_ID_DOMAIN,
   USER_REGISTRY_LEAF_DOMAIN,
 } from './domainConstants.ts'
 
@@ -41,7 +48,6 @@ export const SINGLE_SIG_AUTHORIZATION_PRIMARY_TYPE =
 
 export const TRANSFER_OPERATION_KIND = 0n
 export const WITHDRAWAL_OPERATION_KIND = 1n
-export const DEPOSIT_OPERATION_KIND = 2n
 export const ORIGIN_MODE_DEFAULT = 0n
 export const ORIGIN_MODE_REQUIRE_TAGGED = 1n
 export const LOCK_OUTPUT_BINDING_0 = 1n
@@ -126,25 +132,6 @@ export interface SingleSigAuthorizationParams {
   validUntilSeconds: bigint
   executionChainId: bigint
   verifyingContract?: AddressLike
-}
-
-function foldBinaryHashTree(
-  leaves: bigint[],
-  hash2: (left: bigint, right: bigint) => bigint,
-): bigint {
-  if (leaves.length === 0) {
-    throw new Error('expected at least one leaf')
-  }
-  if (leaves.length === 1) return leaves[0]
-  if (leaves.length === 2) return hash2(leaves[0], leaves[1])
-
-  let leftSize = 1
-  while (leftSize * 2 < leaves.length) leftSize *= 2
-
-  return hash2(
-    foldBinaryHashTree(leaves.slice(0, leftSize), hash2),
-    foldBinaryHashTree(leaves.slice(leftSize), hash2),
-  )
 }
 
 export function hexToBytes(value: string): Uint8Array {
@@ -327,15 +314,75 @@ export function computeTransactionIntentDigest(
   ])
 }
 
+/// Output binding hashes the body commitment (pre-leaf-seal) per EIP Section 7.7.
 export function computeOutputBinding(
-  noteCommitment: bigint,
+  noteBodyCommitment: bigint,
   outputNoteDataHash: bigint,
   pHash: (values: bigint[]) => bigint,
 ): bigint {
-  return pHash([OUTPUT_BINDING_DOMAIN, noteCommitment, outputNoteDataHash])
+  return pHash([OUTPUT_BINDING_DOMAIN, noteBodyCommitment, outputNoteDataHash])
 }
 
-export function computeTransactionReplayId(
+/// Owner-side note commitment per EIP Section 7.3.
+export function computeOwnerCommitment(
+  ownerNullifierKeyHash: bigint,
+  noteSecret: bigint,
+  pHash: (values: bigint[]) => bigint,
+): bigint {
+  return pHash([OWNER_COMMITMENT_DOMAIN, ownerNullifierKeyHash, noteSecret])
+}
+
+/// Semantic note body commitment per EIP Section 7.4. Input order is normative.
+export function computeNoteBodyCommitment(
+  params: {
+    ownerCommitment: bigint
+    amount: bigint
+    tokenAddress: bigint
+    originTag: bigint
+  },
+  pHash: (values: bigint[]) => bigint,
+): bigint {
+  return pHash([
+    NOTE_BODY_COMMITMENT_DOMAIN,
+    params.ownerCommitment,
+    params.amount,
+    params.tokenAddress,
+    params.originTag,
+  ])
+}
+
+/// Final leaf-sealed note commitment per EIP Section 7.5.
+export function computeFinalNoteCommitment(
+  noteBodyCommitment: bigint,
+  leafIndex: bigint,
+  pHash: (values: bigint[]) => bigint,
+): bigint {
+  return pHash([NOTE_COMMITMENT_DOMAIN, noteBodyCommitment, leafIndex])
+}
+
+/// Deposit origin tag per EIP Section 12.1. Applies only when
+/// `originMode == ORIGIN_MODE_REQUIRE_TAGGED`.
+export function computeDepositOriginTag(
+  params: {
+    chainId: bigint
+    depositor: AddressLike
+    tokenAddress: AddressLike
+    amount: bigint
+    leafIndex: bigint
+  },
+  pHash: (values: bigint[]) => bigint,
+): bigint {
+  return pHash([
+    ORIGIN_TAG_DOMAIN,
+    params.chainId,
+    addressToBigInt(params.depositor),
+    addressToBigInt(params.tokenAddress),
+    params.amount,
+    params.leafIndex,
+  ])
+}
+
+export function computeIntentReplayId(
   ownerNullifierKey: bigint,
   authorizingAddress: AddressLike,
   executionChainId: bigint,
@@ -343,7 +390,7 @@ export function computeTransactionReplayId(
   pHash: (values: bigint[]) => bigint,
 ): bigint {
   return pHash([
-    TRANSACTION_REPLAY_ID_DOMAIN,
+    INTENT_REPLAY_ID_DOMAIN,
     ownerNullifierKey,
     addressToBigInt(authorizingAddress),
     executionChainId,
@@ -351,12 +398,14 @@ export function computeTransactionReplayId(
   ])
 }
 
+/// Real-note nullifier per EIP Section 7.6. Binds to the final (leaf-sealed) note
+/// commitment; prover must witness the input note's leaf index.
 export function computeNoteNullifier(
+  noteCommitment: bigint,
   ownerNullifierKey: bigint,
-  noteSecret: bigint,
   pHash: (values: bigint[]) => bigint,
 ): bigint {
-  return pHash([NOTE_NULLIFIER_DOMAIN, ownerNullifierKey, noteSecret])
+  return pHash([NULLIFIER_DOMAIN, noteCommitment, ownerNullifierKey])
 }
 
 export function computeAuthVkHash(
@@ -366,18 +415,7 @@ export function computeAuthVkHash(
   if (vkWords.length === 0) {
     throw new Error('expected non-empty inner VK')
   }
-
-  const leaves: bigint[] = [pHash([AUTH_VK_DOMAIN, BigInt(vkWords.length)])]
-
-  for (let i = 0; i + 1 < vkWords.length; i += 2) {
-    leaves.push(pHash([vkWords[i], vkWords[i + 1]]))
-  }
-
-  if (vkWords.length % 2 === 1) {
-    leaves.push(vkWords[vkWords.length - 1])
-  }
-
-  return foldBinaryHashTree(leaves, (left, right) => pHash([left, right]))
+  return pHash([AUTH_VK_DOMAIN, ...vkWords])
 }
 
 export function buildShieldedPoolIntentTypedData(

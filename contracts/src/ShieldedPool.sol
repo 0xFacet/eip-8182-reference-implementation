@@ -4,6 +4,10 @@ pragma solidity ^0.8.28;
 import {ERC20AssetLib} from "./libraries/ERC20AssetLib.sol";
 import {PoseidonFieldLib} from "./libraries/PoseidonFieldLib.sol";
 
+// System contract: installed at SHIELDED_POOL_ADDRESS (0x...081820) via state
+// dump at the EIP-8182 activation fork (spec §5.1). Not deployed via
+// CREATE/CREATE2, so EIP-170's 24,576-byte contract size limit does not apply.
+// Readability and spec conformance take priority over bytecode size.
 contract ShieldedPool {
     uint256 internal constant MAX_INTENT_LIFETIME = 86400;
     uint256 internal constant NOTE_COMMITMENT_ROOT_HISTORY_SIZE = 500;
@@ -18,19 +22,21 @@ contract ShieldedPool {
 
     address internal constant PROOF_VERIFY_PRECOMPILE_ADDRESS = 0x0000000000000000000000000000000000000030;
 
+    uint8 internal constant ORIGIN_MODE_DEFAULT = 0;
+    uint8 internal constant ORIGIN_MODE_REQUIRE_TAGGED = 1;
+
+    /// 17 public inputs per EIP-8182 Section 10.
     struct PublicInputs {
         uint256 noteCommitmentRoot;
         uint256 nullifier0;
         uint256 nullifier1;
-        uint256 noteCommitment0;
-        uint256 noteCommitment1;
-        uint256 noteCommitment2;
-        uint256 publicAmountIn;
+        uint256 noteBodyCommitment0;
+        uint256 noteBodyCommitment1;
+        uint256 noteBodyCommitment2;
         uint256 publicAmountOut;
         uint256 publicRecipientAddress;
         uint256 publicTokenAddress;
-        uint256 depositorAddress;
-        uint256 transactionReplayId;
+        uint256 intentReplayId;
         uint256 registryRoot;
         uint256 validUntilSeconds;
         uint256 executionChainId;
@@ -59,16 +65,13 @@ contract ShieldedPool {
 
     enum PublicAction {
         Transfer,
-        Deposit,
         Withdrawal
     }
 
     struct PreparedPublicAction {
         PublicAction kind;
-        address depositor;
         address recipient;
         address token;
-        uint256 amountIn;
         uint256 amountOut;
     }
 
@@ -80,15 +83,22 @@ contract ShieldedPool {
     error DuplicateNullifier();
     error EthAmountMismatch();
     error EthTransferFailed();
+    error Erc20DeliveredLess();
     error FieldElementNotCanonical();
     error IntentExpired();
     error IntentLifetimeTooLong();
-    error TransactionReplayIdAlreadyUsed();
+    error IntentReplayIdAlreadyUsed();
+    error InvalidDepositAmount();
+    error InvalidOriginMode();
+    error InvalidOriginTag();
     error InvalidOutputNoteDataHash(uint8 slot);
+    error InvalidOwnerCommitment();
     error InvalidPublicActionConfiguration();
     error InvalidProof();
     error NullifierAlreadySpent();
+    error OwnerNullifierKeyHashAlreadyUsed();
     error ReentrantCall();
+    error ReservedOwnerNullifierKeyHash();
     error TreeFull();
     error UnexpectedEth();
     error UnknownNoteCommitmentRoot();
@@ -97,14 +107,13 @@ contract ShieldedPool {
     error UserAlreadyRegistered();
     error UserNotRegistered();
     error WrongChainId();
-    error WrongDepositor();
     error ZeroNoteCommitment();
     error ZeroLeaf();
 
     event ShieldedPoolTransact(
         uint256 indexed nullifier0,
         uint256 indexed nullifier1,
-        uint256 indexed transactionReplayId,
+        uint256 indexed intentReplayId,
         uint256 noteCommitment0,
         uint256 noteCommitment1,
         uint256 noteCommitment2,
@@ -113,6 +122,17 @@ contract ShieldedPool {
         bytes outputNoteData0,
         bytes outputNoteData1,
         bytes outputNoteData2
+    );
+
+    event ShieldedPoolDeposit(
+        address indexed depositor,
+        uint256 noteCommitment,
+        uint256 leafIndex,
+        uint256 amount,
+        uint256 tokenAddress,
+        uint256 originTag,
+        uint256 postInsertionCommitmentRoot,
+        bytes outputNoteData
     );
 
     event UserRegistered(address indexed user, uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHash);
@@ -141,6 +161,7 @@ contract ShieldedPool {
     mapping(uint256 => uint256) internal userRegistryRootHistory;
     mapping(uint256 => uint256) internal userRegistryRootBlock;
     mapping(address => UserRegistryEntry) private userRegistryEntries;
+    mapping(uint256 => address) private ownerNullifierKeyHashIndex;
     mapping(address => DeliveryEndpoint) private deliveryEndpoints;
 
     uint256 internal currentAuthPolicyRoot;
@@ -152,7 +173,7 @@ contract ShieldedPool {
     mapping(bytes32 => uint256) private policyVersions;
 
     mapping(uint256 => bool) private nullifierSpent;
-    mapping(uint256 => bool) private transactionReplayIdUsed;
+    mapping(uint256 => bool) private intentReplayIdUsed;
     uint256[COMMITMENT_TREE_DEPTH] internal noteCommitmentEmptyHashes;
     uint256[REGISTRY_TREE_DEPTH] internal sparseEmptyHashes;
 
@@ -178,7 +199,40 @@ contract ShieldedPool {
         bytes calldata outputNoteData0,
         bytes calldata outputNoteData1,
         bytes calldata outputNoteData2
-    ) external payable nonReentrant {
+    ) external nonReentrant {
+        _validateTransactPublicInputs(proof, publicInputs);
+
+        PreparedPublicAction memory action = _preparePublicAction(publicInputs);
+
+        _consumeNullifiersAndReplayId(publicInputs);
+
+        uint256 leafIndex0 = nextLeafIndex;
+        require(leafIndex0 + 2 <= MAX_NOTE_COMMITMENT_LEAF_INDEX, TreeFull());
+
+        uint256[3] memory finalCommitments = _sealTransactCommitments(publicInputs, leafIndex0);
+
+        _pushNoteCommitmentRoot(_currentNoteCommitmentRoot());
+        _insertNoteCommitment(finalCommitments[0]);
+        _insertNoteCommitment(finalCommitments[1]);
+        _insertNoteCommitment(finalCommitments[2]);
+
+        _assertOutputNoteHash(outputNoteData0, publicInputs.outputNoteDataHash0, 0);
+        _assertOutputNoteHash(outputNoteData1, publicInputs.outputNoteDataHash1, 1);
+        _assertOutputNoteHash(outputNoteData2, publicInputs.outputNoteDataHash2, 2);
+
+        _executePublicAction(action);
+
+        _emitTransactEvent(
+            publicInputs,
+            finalCommitments,
+            leafIndex0,
+            outputNoteData0,
+            outputNoteData1,
+            outputNoteData2
+        );
+    }
+
+    function _validateTransactPublicInputs(bytes calldata proof, PublicInputs calldata publicInputs) private view {
         _verifyProof(proof, publicInputs);
         _ensureCanonicalProofFields(publicInputs);
 
@@ -191,49 +245,142 @@ contract ShieldedPool {
         require(isAcceptedNoteCommitmentRoot(publicInputs.noteCommitmentRoot), UnknownNoteCommitmentRoot());
         require(isAcceptedUserRegistryRoot(publicInputs.registryRoot), UnknownUserRegistryRoot());
         require(isAcceptedAuthPolicyRoot(publicInputs.authPolicyRegistryRoot), UnknownAuthPolicyRoot());
+    }
 
-        PreparedPublicAction memory action = _preparePublicAction(publicInputs);
-
+    function _consumeNullifiersAndReplayId(PublicInputs calldata publicInputs) private {
         require(publicInputs.nullifier0 != publicInputs.nullifier1, DuplicateNullifier());
         require(!nullifierSpent[publicInputs.nullifier0], NullifierAlreadySpent());
         require(!nullifierSpent[publicInputs.nullifier1], NullifierAlreadySpent());
         nullifierSpent[publicInputs.nullifier0] = true;
         nullifierSpent[publicInputs.nullifier1] = true;
 
-        require(!transactionReplayIdUsed[publicInputs.transactionReplayId], TransactionReplayIdAlreadyUsed());
-        transactionReplayIdUsed[publicInputs.transactionReplayId] = true;
+        require(!intentReplayIdUsed[publicInputs.intentReplayId], IntentReplayIdAlreadyUsed());
+        intentReplayIdUsed[publicInputs.intentReplayId] = true;
+    }
 
+    function _sealTransactCommitments(PublicInputs calldata publicInputs, uint256 leafIndex0)
+        private
+        pure
+        returns (uint256[3] memory finalCommitments)
+    {
+        finalCommitments[0] = PoseidonFieldLib.noteCommitment(publicInputs.noteBodyCommitment0, leafIndex0);
+        finalCommitments[1] = PoseidonFieldLib.noteCommitment(publicInputs.noteBodyCommitment1, leafIndex0 + 1);
+        finalCommitments[2] = PoseidonFieldLib.noteCommitment(publicInputs.noteBodyCommitment2, leafIndex0 + 2);
         require(
-            publicInputs.noteCommitment0 != 0 && publicInputs.noteCommitment1 != 0 && publicInputs.noteCommitment2 != 0,
+            finalCommitments[0] != 0 && finalCommitments[1] != 0 && finalCommitments[2] != 0,
             ZeroNoteCommitment()
         );
+    }
 
-        uint256 leafIndex0 = nextLeafIndex;
-        require(leafIndex0 + 2 <= MAX_NOTE_COMMITMENT_LEAF_INDEX, TreeFull());
+    function _emitTransactEvent(
+        PublicInputs calldata publicInputs,
+        uint256[3] memory finalCommitments,
+        uint256 leafIndex0,
+        bytes calldata outputNoteData0,
+        bytes calldata outputNoteData1,
+        bytes calldata outputNoteData2
+    ) private {
+        emit ShieldedPoolTransact(
+            publicInputs.nullifier0,
+            publicInputs.nullifier1,
+            publicInputs.intentReplayId,
+            finalCommitments[0],
+            finalCommitments[1],
+            finalCommitments[2],
+            leafIndex0,
+            currentNoteCommitmentRoot,
+            outputNoteData0,
+            outputNoteData1,
+            outputNoteData2
+        );
+    }
 
-        uint256 preInsertionNoteCommitmentRoot = _currentNoteCommitmentRoot();
-        _pushNoteCommitmentRoot(preInsertionNoteCommitmentRoot);
+    /// Contract-native deposit per EIP Section 5.3 / Section 5.4.2.
+    function deposit(
+        address token,
+        uint256 amount,
+        uint8 originMode,
+        uint256 ownerCommitment,
+        bytes calldata outputNoteData
+    ) external payable nonReentrant {
+        require(amount > 0 && amount <= MAX_AMOUNT_VALUE, InvalidDepositAmount());
+        require(ownerCommitment != 0, InvalidOwnerCommitment());
+        _ensureCanonicalField(ownerCommitment);
+        require(
+            originMode == ORIGIN_MODE_DEFAULT || originMode == ORIGIN_MODE_REQUIRE_TAGGED,
+            InvalidOriginMode()
+        );
 
-        _insertNoteCommitment(publicInputs.noteCommitment0);
-        _insertNoteCommitment(publicInputs.noteCommitment1);
-        _insertNoteCommitment(publicInputs.noteCommitment2);
+        if (token == address(0)) {
+            require(msg.value == amount, EthAmountMismatch());
+        } else {
+            require(msg.value == 0, UnexpectedEth());
+            uint256 balBefore = ERC20AssetLib.balanceOf(token, address(this));
+            ERC20AssetLib.pullExact(token, msg.sender, address(this), amount);
+            uint256 balAfter = ERC20AssetLib.balanceOf(token, address(this));
+            require(balAfter - balBefore == amount, Erc20DeliveredLess());
+        }
 
-        _assertOutputNoteHash(outputNoteData0, publicInputs.outputNoteDataHash0, 0);
-        _assertOutputNoteHash(outputNoteData1, publicInputs.outputNoteDataHash1, 1);
-        _assertOutputNoteHash(outputNoteData2, publicInputs.outputNoteDataHash2, 2);
+        uint256 leafIndex = nextLeafIndex;
+        require(leafIndex <= MAX_NOTE_COMMITMENT_LEAF_INDEX, TreeFull());
 
-        _executePublicAction(action);
+        uint256 originTag = _computeDepositOriginTag(originMode, token, amount, leafIndex);
+        uint256 finalNoteCommitment =
+            _sealDepositNoteCommitment(ownerCommitment, amount, uint256(uint160(token)), originTag, leafIndex);
 
-        _emitTransactEvent(publicInputs, leafIndex0, outputNoteData0, outputNoteData1, outputNoteData2);
+        _pushNoteCommitmentRoot(_currentNoteCommitmentRoot());
+        _insertNoteCommitment(finalNoteCommitment);
+
+        emit ShieldedPoolDeposit(
+            msg.sender,
+            finalNoteCommitment,
+            leafIndex,
+            amount,
+            uint256(uint160(token)),
+            originTag,
+            currentNoteCommitmentRoot,
+            outputNoteData
+        );
+    }
+
+    function _sealDepositNoteCommitment(
+        uint256 ownerCommitment,
+        uint256 amount,
+        uint256 tokenAsUint,
+        uint256 originTag,
+        uint256 leafIndex
+    ) private pure returns (uint256) {
+        uint256 body = PoseidonFieldLib.noteBodyCommitment(ownerCommitment, amount, tokenAsUint, originTag);
+        uint256 finalCommitment = PoseidonFieldLib.noteCommitment(body, leafIndex);
+        require(finalCommitment != 0, ZeroNoteCommitment());
+        return finalCommitment;
+    }
+
+    function _computeDepositOriginTag(uint8 originMode, address token, uint256 amount, uint256 leafIndex)
+        private
+        view
+        returns (uint256)
+    {
+        if (originMode == ORIGIN_MODE_DEFAULT) return 0;
+
+        uint256 originTag = PoseidonFieldLib.depositOriginTag(
+            block.chainid,
+            uint256(uint160(msg.sender)),
+            uint256(uint160(token)),
+            amount,
+            leafIndex
+        );
+        require(originTag != 0, InvalidOriginTag());
+        return originTag;
     }
 
     function getCurrentRoots()
         external
         view
-        returns (uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRegistryRoot)
+        returns (uint256 noteCommitmentRoot, uint256 registryRoot, uint256 authPolicyRegistryRoot)
     {
         noteCommitmentRoot = _currentNoteCommitmentRoot();
-        userRegistryRoot = _currentUserRegistryRoot();
+        registryRoot = _currentUserRegistryRoot();
         authPolicyRegistryRoot = _currentAuthPolicyRoot();
     }
 
@@ -261,8 +408,8 @@ contract ShieldedPool {
         return nullifierSpent[nullifier];
     }
 
-    function isTransactionReplayIdUsed(uint256 transactionReplayId) external view returns (bool) {
-        return transactionReplayIdUsed[transactionReplayId];
+    function isIntentReplayIdUsed(uint256 intentReplayId) external view returns (bool) {
+        return intentReplayIdUsed[intentReplayId];
     }
 
     function registerUser(uint256 ownerNullifierKeyHash, uint256 noteSecretSeedHash) external {
@@ -358,6 +505,13 @@ contract ShieldedPool {
         _ensureCanonicalField(ownerNullifierKeyHash);
         _ensureCanonicalField(noteSecretSeedHash);
 
+        require(ownerNullifierKeyHash != 0, ReservedOwnerNullifierKeyHash());
+        require(
+            ownerNullifierKeyHash != PoseidonFieldLib.dummyOwnerNullifierKeyHash(),
+            ReservedOwnerNullifierKeyHash()
+        );
+        require(ownerNullifierKeyHashIndex[ownerNullifierKeyHash] == address(0), OwnerNullifierKeyHashAlreadyUsed());
+
         UserRegistryEntry storage entry = userRegistryEntries[user];
         require(!entry.registered, UserAlreadyRegistered());
 
@@ -370,6 +524,7 @@ contract ShieldedPool {
         userRegistryEntries[user] = UserRegistryEntry({
             registered: true, ownerNullifierKeyHash: ownerNullifierKeyHash, noteSecretSeedHash: noteSecretSeedHash
         });
+        ownerNullifierKeyHashIndex[ownerNullifierKeyHash] = user;
 
         emit UserRegistered(user, ownerNullifierKeyHash, noteSecretSeedHash);
     }
@@ -379,12 +534,6 @@ contract ShieldedPool {
 
         deliveryEndpoints[user] = DeliveryEndpoint({schemeId: schemeId, keyBytes: keyBytes});
         emit DeliveryKeySet(user, schemeId, keyBytes);
-    }
-
-    function _executeDeposit(address publicToken, uint256 publicAmountIn) private {
-        if (publicToken != address(0)) {
-            ERC20AssetLib.pullExact(publicToken, msg.sender, address(this), publicAmountIn);
-        }
     }
 
     function _executeWithdrawal(address publicRecipient, address publicToken, uint256 publicAmountOut) private {
@@ -397,98 +546,49 @@ contract ShieldedPool {
     }
 
     function _executePublicAction(PreparedPublicAction memory action) private {
-        if (action.kind == PublicAction.Deposit) {
-            _executeDeposit(action.token, action.amountIn);
-        } else if (action.kind == PublicAction.Withdrawal) {
+        if (action.kind == PublicAction.Withdrawal) {
             _executeWithdrawal(action.recipient, action.token, action.amountOut);
         }
     }
 
-    function _emitTransactEvent(
-        PublicInputs calldata publicInputs,
-        uint256 leafIndex0,
-        bytes calldata outputNoteData0,
-        bytes calldata outputNoteData1,
-        bytes calldata outputNoteData2
-    ) private {
-        emit ShieldedPoolTransact(
-            publicInputs.nullifier0,
-            publicInputs.nullifier1,
-            publicInputs.transactionReplayId,
-            publicInputs.noteCommitment0,
-            publicInputs.noteCommitment1,
-            publicInputs.noteCommitment2,
-            leafIndex0,
-            currentNoteCommitmentRoot,
-            outputNoteData0,
-            outputNoteData1,
-            outputNoteData2
-        );
-    }
-
     function _preparePublicAction(PublicInputs calldata publicInputs)
         private
-        view
+        pure
         returns (PreparedPublicAction memory action)
     {
-        require(publicInputs.publicAmountIn <= MAX_AMOUNT_VALUE, AmountOutOfRange());
         require(publicInputs.publicAmountOut <= MAX_AMOUNT_VALUE, AmountOutOfRange());
         require(publicInputs.publicRecipientAddress <= MAX_ADDRESS_VALUE, AddressOutOfRange());
         require(publicInputs.publicTokenAddress <= MAX_ADDRESS_VALUE, AddressOutOfRange());
-        require(publicInputs.depositorAddress <= MAX_ADDRESS_VALUE, AddressOutOfRange());
 
-        if (publicInputs.depositorAddress != 0) {
-            action.kind = PublicAction.Deposit;
-        } else if (publicInputs.publicAmountOut != 0) {
+        if (publicInputs.publicAmountOut != 0) {
             action.kind = PublicAction.Withdrawal;
         } else {
             action.kind = PublicAction.Transfer;
         }
 
-        action.depositor = address(uint160(publicInputs.depositorAddress));
         action.recipient = address(uint160(publicInputs.publicRecipientAddress));
         action.token = address(uint160(publicInputs.publicTokenAddress));
-        action.amountIn = publicInputs.publicAmountIn;
         action.amountOut = publicInputs.publicAmountOut;
 
-        if (action.kind == PublicAction.Deposit) {
-            _validateDepositAction(action);
-        } else if (action.kind == PublicAction.Withdrawal) {
+        if (action.kind == PublicAction.Withdrawal) {
             _validateWithdrawalAction(action);
         } else {
             _validateTransferAction(action);
         }
     }
 
-    function _validateDepositAction(PreparedPublicAction memory action) private view {
+    function _validateWithdrawalAction(PreparedPublicAction memory action) private pure {
         require(
-            action.amountIn != 0 && action.amountOut == 0 && action.recipient == address(0),
+            action.amountOut != 0 && action.recipient != address(0),
             InvalidPublicActionConfiguration()
         );
-        require(msg.sender == action.depositor, WrongDepositor());
-
-        if (action.token == address(0)) {
-            require(msg.value == action.amountIn, EthAmountMismatch());
-        } else {
-            require(msg.value == 0, UnexpectedEth());
-        }
     }
 
-    function _validateWithdrawalAction(PreparedPublicAction memory action) private view {
+    function _validateTransferAction(PreparedPublicAction memory action) private pure {
         require(
-            action.amountIn == 0 && action.amountOut != 0 && action.recipient != address(0),
+            action.amountOut == 0 && action.recipient == address(0) && action.token == address(0),
             InvalidPublicActionConfiguration()
         );
-        require(msg.value == 0, UnexpectedEth());
-    }
-
-    function _validateTransferAction(PreparedPublicAction memory action) private view {
-        require(
-            action.depositor == address(0) && action.amountIn == 0 && action.amountOut == 0
-                && action.recipient == address(0) && action.token == address(0),
-            InvalidPublicActionConfiguration()
-        );
-        require(msg.value == 0, UnexpectedEth());
     }
 
     function _verifyProof(bytes calldata proof, PublicInputs calldata publicInputs) private view {
@@ -507,10 +607,10 @@ contract ShieldedPool {
         _ensureCanonicalField(publicInputs.noteCommitmentRoot);
         _ensureCanonicalField(publicInputs.nullifier0);
         _ensureCanonicalField(publicInputs.nullifier1);
-        _ensureCanonicalField(publicInputs.noteCommitment0);
-        _ensureCanonicalField(publicInputs.noteCommitment1);
-        _ensureCanonicalField(publicInputs.noteCommitment2);
-        _ensureCanonicalField(publicInputs.transactionReplayId);
+        _ensureCanonicalField(publicInputs.noteBodyCommitment0);
+        _ensureCanonicalField(publicInputs.noteBodyCommitment1);
+        _ensureCanonicalField(publicInputs.noteBodyCommitment2);
+        _ensureCanonicalField(publicInputs.intentReplayId);
         _ensureCanonicalField(publicInputs.registryRoot);
         _ensureCanonicalField(publicInputs.authPolicyRegistryRoot);
         _ensureCanonicalField(publicInputs.outputNoteDataHash0);
@@ -613,9 +713,9 @@ contract ShieldedPool {
         for (uint256 level; level < COMMITMENT_TREE_DEPTH; ++level) {
             if (((index >> level) & 1) == 0) {
                 filledNoteCommitmentSubtrees[level] = currentHash;
-                currentHash = PoseidonFieldLib.hash2Raw(currentHash, noteCommitmentEmptyHashes[level]);
+                currentHash = PoseidonFieldLib.merkleHash(currentHash, noteCommitmentEmptyHashes[level]);
             } else {
-                currentHash = PoseidonFieldLib.hash2Raw(filledNoteCommitmentSubtrees[level], currentHash);
+                currentHash = PoseidonFieldLib.merkleHash(filledNoteCommitmentSubtrees[level], currentHash);
             }
         }
 
@@ -635,9 +735,9 @@ contract ShieldedPool {
             if (sibling == 0) sibling = sparseEmptyHashes[level];
 
             if ((index & 1) == 0) {
-                currentHash = PoseidonFieldLib.hash2Raw(currentHash, sibling);
+                currentHash = PoseidonFieldLib.merkleHash(currentHash, sibling);
             } else {
-                currentHash = PoseidonFieldLib.hash2Raw(sibling, currentHash);
+                currentHash = PoseidonFieldLib.merkleHash(sibling, currentHash);
             }
 
             index >>= 1;
@@ -659,9 +759,9 @@ contract ShieldedPool {
             if (sibling == 0) sibling = sparseEmptyHashes[level];
 
             if ((index & 1) == 0) {
-                currentHash = PoseidonFieldLib.hash2Raw(currentHash, sibling);
+                currentHash = PoseidonFieldLib.merkleHash(currentHash, sibling);
             } else {
-                currentHash = PoseidonFieldLib.hash2Raw(sibling, currentHash);
+                currentHash = PoseidonFieldLib.merkleHash(sibling, currentHash);
             }
 
             index >>= 1;

@@ -11,12 +11,15 @@ const FIELD_MODULUS =
   21888242871839275222246405745257275088548364400416034343698204186575808495617n
 
 const DOMAIN_CONTEXTS = {
-  NOTE_NULLIFIER_DOMAIN: 'note_nullifier',
+  OWNER_COMMITMENT_DOMAIN: 'owner_commitment',
+  NOTE_BODY_COMMITMENT_DOMAIN: 'note_body_commitment',
+  NOTE_COMMITMENT_DOMAIN: 'note_commitment',
+  NULLIFIER_DOMAIN: 'nullifier',
   PHANTOM_NULLIFIER_DOMAIN: 'phantom_nullifier',
   ORIGIN_TAG_DOMAIN: 'origin_tag',
-  TRANSACTION_REPLAY_ID_DOMAIN: 'transaction_replay_id',
+  INTENT_REPLAY_ID_DOMAIN: 'intent_replay_id',
   OWNER_NULLIFIER_KEY_HASH_DOMAIN: 'owner_nullifier_key_hash',
-  NOTE_SECRET_DOMAIN: 'note_secret',
+  TRANSACT_NOTE_SECRET_DOMAIN: 'transact_note_secret',
   TRANSACTION_INTENT_DIGEST_DOMAIN: 'transaction_intent_digest',
   OUTPUT_BINDING_DOMAIN: 'output_binding',
   AUTH_POLICY_DOMAIN: 'auth_policy',
@@ -87,7 +90,6 @@ pub global AUTH_POLICY_TREE_DEPTH: u32 = 160;
 
 pub global TRANSFER_OP: Field = 0;
 pub global WITHDRAWAL_OP: Field = 1;
-pub global DEPOSIT_OP: Field = 2;
 pub global ORIGIN_MODE_DEFAULT: Field = 0;
 pub global ORIGIN_MODE_REQUIRE_TAGGED: Field = 1;
 

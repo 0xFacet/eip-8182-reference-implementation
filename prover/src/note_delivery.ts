@@ -3,11 +3,16 @@ import { keccak_256 } from '@noble/hashes/sha3'
 import { extract, expand } from '@noble/hashes/hkdf'
 import { sha256 } from '@noble/hashes/sha256'
 import { XWing } from '@noble/post-quantum/hybrid.js'
-import { computeNoteCommitment, computeNoteNullifier } from '../../integration/src/eip8182.ts'
+import {
+  computeFullNoteCommitment,
+  computeNoteNullifier,
+  computeOwnerNullifierKeyHash,
+} from '../../integration/src/eip8182.ts'
 
+// The note body the wallet persists. Contains everything required to reconstruct
+// the final (leaf-sealed) commitment and spend the note via a future transact.
 interface NoteFields {
   amount: bigint
-  ownerAddress: bigint
   noteSecret: bigint
   ownerNullifierKeyHash: bigint
   tokenAddress: bigint
@@ -15,10 +20,9 @@ interface NoteFields {
 }
 
 interface StoredNote {
-  commitment: string
+  commitment: string       // final leaf-sealed commitment
   leafIndex: number
   amount: string
-  ownerAddress: string
   noteSecret: string
   ownerNullifierKeyHash: string
   tokenAddress: string
@@ -28,14 +32,19 @@ interface StoredNote {
 export interface ChainNote {
   leafIndex: number
   encryptedData: string
-  commitment: string
+  commitment: string       // final leaf-sealed commitment from chain
+  kind: 'transact' | 'deposit'
+  // Deposit-only fields (provided by ShieldedPoolDeposit event).
+  amount?: string
+  tokenAddress?: string
+  originTag?: string
 }
 
 export interface ShieldedPoolTransactHistoryEntry {
   leafIndex0: number | string
   nullifier0: string
   nullifier1: string
-  transactionReplayId: string
+  intentReplayId: string
   noteCommitment0: string
   noteCommitment1: string
   noteCommitment2: string
@@ -44,9 +53,24 @@ export interface ShieldedPoolTransactHistoryEntry {
   outputNoteData2: string
 }
 
+export interface ShieldedPoolDepositHistoryEntry {
+  leafIndex: number | string
+  noteCommitment: string
+  amount: string
+  tokenAddress: string
+  originTag: string
+  outputNoteData: string
+}
+
 const DELIVERY_KEY_LABEL = 'EIP-8182-delivery-scheme-1 key'
 const DELIVERY_NONCE_LABEL = 'EIP-8182-delivery-scheme-1 nonce'
-const NOTE_DATA_LENGTH = 1328
+
+// Scheme 1A (transact) wire format: enc(1120) || ciphertext(160) || tag(16) = 1296 bytes.
+const SCHEME_1A_LENGTH = 1296
+const SCHEME_1A_PLAINTEXT = 160
+// Scheme 1B (deposit) wire format: enc(1120) || ciphertext(64) || tag(16) = 1200 bytes.
+const SCHEME_1B_LENGTH = 1200
+const SCHEME_1B_PLAINTEXT = 64
 
 function toHex(value: bigint): string {
   return '0x' + value.toString(16)
@@ -57,26 +81,30 @@ function fromHexBytes(value: string): Uint8Array {
   return new Uint8Array(raw.match(/.{2}/g)?.map((byte) => parseInt(byte, 16)) ?? [])
 }
 
-function noteCommitment(note: NoteFields, pHash: (values: bigint[]) => bigint): bigint {
-  return computeNoteCommitment(pHash, note)
+function readWord(buf: Uint8Array, offset: number): bigint {
+  let value = 0n
+  for (let i = 0; i < 32; i++) {
+    value = (value << 8n) | BigInt(buf[offset + i])
+  }
+  return value
 }
 
-function decodeNotePlaintext(buf: Uint8Array): NoteFields {
-  const readWord = (offset: number) => {
-    let value = 0n
-    for (let i = 0; i < 32; i++) {
-      value = (value << 8n) | BigInt(buf[offset + i])
-    }
-    return value
-  }
-
+// Scheme 1A plaintext per EIP Section 15.2.
+function decodeScheme1A(buf: Uint8Array): Pick<NoteFields, 'amount' | 'ownerNullifierKeyHash' | 'noteSecret' | 'tokenAddress' | 'originTag'> {
   return {
-    amount: readWord(0),
-    ownerAddress: readWord(32),
-    noteSecret: readWord(64),
-    ownerNullifierKeyHash: readWord(96),
-    tokenAddress: readWord(128),
-    originTag: readWord(160),
+    amount: readWord(buf, 0),
+    ownerNullifierKeyHash: readWord(buf, 32),
+    noteSecret: readWord(buf, 64),
+    tokenAddress: readWord(buf, 96),
+    originTag: readWord(buf, 128),
+  }
+}
+
+// Scheme 1B plaintext per EIP Section 15.3.
+function decodeScheme1B(buf: Uint8Array): { ownerNullifierKeyHash: bigint; noteSecret: bigint } {
+  return {
+    ownerNullifierKeyHash: readWord(buf, 0),
+    noteSecret: readWord(buf, 32),
   }
 }
 
@@ -95,19 +123,21 @@ export function deriveDeliveryKeypair(deliverySecret: bigint) {
   return XWing.keygen(deliverySeed(deliverySecret))
 }
 
-function decryptNoteData(xwingSecretKey: Uint8Array, encryptedData: Uint8Array): NoteFields | null {
-  if (encryptedData.length !== NOTE_DATA_LENGTH) return null
-
+function decryptCiphertext(
+  xwingSecretKey: Uint8Array,
+  encryptedData: Uint8Array,
+  plaintextLength: number,
+): Uint8Array | null {
   try {
     const encapsulatedKey = encryptedData.slice(0, 1120)
-    const ciphertext = encryptedData.slice(1120, 1312)
-    const tag = encryptedData.slice(1312, NOTE_DATA_LENGTH)
+    const ciphertext = encryptedData.slice(1120, 1120 + plaintextLength)
+    const tag = encryptedData.slice(1120 + plaintextLength, 1120 + plaintextLength + 16)
     const sharedSecret = XWing.decapsulate(encapsulatedKey, xwingSecretKey)
     const { key, nonce } = deriveKeyAndNonce(sharedSecret)
     const decipher = createDecipheriv('aes-256-gcm', key, nonce)
     decipher.setAuthTag(tag)
     const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()])
-    return decodeNotePlaintext(new Uint8Array(plaintext))
+    return new Uint8Array(plaintext)
   } catch {
     return null
   }
@@ -138,21 +168,23 @@ export class NoteStore {
     this.spentNullifiers = new Set()
   }
 
+  /// Walk chain notes, decrypt/verify against this wallet's ownerNullifierKey,
+  /// and return a list of unspent notes. Dispatches by event kind: transact
+  /// outputs use Scheme 1A; deposit outputs use Scheme 1B (EIP Section 15).
   async getUnspentNotes(
-    ownerAddress: bigint,
     ownerNullifierKey: bigint,
     deliverySecret: bigint,
   ): Promise<StoredNote[]> {
-    const ownerHex = toHex(ownerAddress)
+    const expectedOwnerNullifierKeyHash = computeOwnerNullifierKeyHash(this.pHash, ownerNullifierKey)
+    const { secretKey } = deriveDeliveryKeypair(deliverySecret)
     const result: StoredNote[] = []
     const seen = new Set<string>()
-    const { secretKey } = deriveDeliveryKeypair(deliverySecret)
 
     for (const note of this.notes) {
-      if (note.ownerAddress !== ownerHex) continue
+      if (BigInt(note.ownerNullifierKeyHash) !== expectedOwnerNullifierKeyHash) continue
       if (BigInt(note.amount) === 0n) continue
 
-      const nullifier = computeNoteNullifier(this.pHash, ownerNullifierKey, BigInt(note.noteSecret))
+      const nullifier = computeNoteNullifier(this.pHash, BigInt(note.commitment), ownerNullifierKey)
       if (this.spentNullifiers.has(toHex(nullifier))) continue
 
       result.push(note)
@@ -162,30 +194,94 @@ export class NoteStore {
     for (const chainNote of this.chainNotes) {
       if (seen.has(chainNote.commitment)) continue
 
-      const decrypted = decryptNoteData(secretKey, fromHexBytes(chainNote.encryptedData))
-      if (!decrypted) continue
-      if (decrypted.ownerAddress !== ownerAddress) continue
-      if (decrypted.amount === 0n) continue
-      if (BigInt(chainNote.commitment) != noteCommitment(decrypted, this.pHash)) continue
+      const recovered = this.tryRecoverChainNote(
+        chainNote,
+        secretKey,
+        expectedOwnerNullifierKeyHash,
+      )
+      if (!recovered) continue
 
-      const nullifier = computeNoteNullifier(this.pHash, ownerNullifierKey, decrypted.noteSecret)
+      const nullifier = computeNoteNullifier(
+        this.pHash,
+        BigInt(recovered.commitment),
+        ownerNullifierKey,
+      )
       if (this.spentNullifiers.has(toHex(nullifier))) continue
 
-      const recoveredNote: StoredNote = {
-        commitment: chainNote.commitment,
-        leafIndex: chainNote.leafIndex,
-        amount: decrypted.amount.toString(),
-        ownerAddress: toHex(decrypted.ownerAddress),
-        noteSecret: toHex(decrypted.noteSecret),
-        ownerNullifierKeyHash: toHex(decrypted.ownerNullifierKeyHash),
-        tokenAddress: toHex(decrypted.tokenAddress),
-        originTag: toHex(decrypted.originTag),
-      }
-      result.push(recoveredNote)
-      seen.add(chainNote.commitment)
+      result.push(recovered)
+      seen.add(recovered.commitment)
     }
 
     return result
+  }
+
+  private tryRecoverChainNote(
+    chainNote: ChainNote,
+    secretKey: Uint8Array,
+    expectedOwnerNullifierKeyHash: bigint,
+  ): StoredNote | null {
+    const encryptedData = fromHexBytes(chainNote.encryptedData)
+
+    if (chainNote.kind === 'transact') {
+      if (encryptedData.length !== SCHEME_1A_LENGTH) return null
+      const plaintext = decryptCiphertext(secretKey, encryptedData, SCHEME_1A_PLAINTEXT)
+      if (!plaintext) return null
+      const fields = decodeScheme1A(plaintext)
+      if (fields.ownerNullifierKeyHash !== expectedOwnerNullifierKeyHash) return null
+      if (fields.amount === 0n) return null
+
+      const reconstructed = computeFullNoteCommitment(this.pHash, {
+        ownerNullifierKeyHash: fields.ownerNullifierKeyHash,
+        noteSecret: fields.noteSecret,
+        amount: fields.amount,
+        tokenAddress: fields.tokenAddress,
+        originTag: fields.originTag,
+        leafIndex: BigInt(chainNote.leafIndex),
+      })
+      if (reconstructed !== BigInt(chainNote.commitment)) return null
+
+      return {
+        commitment: chainNote.commitment,
+        leafIndex: chainNote.leafIndex,
+        amount: fields.amount.toString(),
+        noteSecret: toHex(fields.noteSecret),
+        ownerNullifierKeyHash: toHex(fields.ownerNullifierKeyHash),
+        tokenAddress: toHex(fields.tokenAddress),
+        originTag: toHex(fields.originTag),
+      }
+    }
+
+    // kind === 'deposit' → Scheme 1B
+    if (encryptedData.length !== SCHEME_1B_LENGTH) return null
+    if (chainNote.amount === undefined || chainNote.tokenAddress === undefined || chainNote.originTag === undefined) {
+      return null
+    }
+    const plaintext = decryptCiphertext(secretKey, encryptedData, SCHEME_1B_PLAINTEXT)
+    if (!plaintext) return null
+    const fields = decodeScheme1B(plaintext)
+    if (fields.ownerNullifierKeyHash !== expectedOwnerNullifierKeyHash) return null
+    const amount = BigInt(chainNote.amount)
+    if (amount === 0n) return null
+
+    const reconstructed = computeFullNoteCommitment(this.pHash, {
+      ownerNullifierKeyHash: fields.ownerNullifierKeyHash,
+      noteSecret: fields.noteSecret,
+      amount,
+      tokenAddress: BigInt(chainNote.tokenAddress),
+      originTag: BigInt(chainNote.originTag),
+      leafIndex: BigInt(chainNote.leafIndex),
+    })
+    if (reconstructed !== BigInt(chainNote.commitment)) return null
+
+    return {
+      commitment: chainNote.commitment,
+      leafIndex: chainNote.leafIndex,
+      amount: amount.toString(),
+      noteSecret: toHex(fields.noteSecret),
+      ownerNullifierKeyHash: toHex(fields.ownerNullifierKeyHash),
+      tokenAddress: chainNote.tokenAddress,
+      originTag: chainNote.originTag,
+    }
   }
 }
 
@@ -217,11 +313,35 @@ export function replayShieldedPoolTransactsIntoNoteStore(
           leafIndex: leafIndex0 + slot,
           encryptedData: data,
           commitment: commitments[slot],
+          kind: 'transact',
         })
       }
     }
 
     noteStore.markSpent(BigInt(transact.nullifier0))
     noteStore.markSpent(BigInt(transact.nullifier1))
+  }
+}
+
+export function replayShieldedPoolDepositsIntoNoteStore(
+  noteStore: NoteStore,
+  deposits: ShieldedPoolDepositHistoryEntry[],
+) {
+  const sorted = [...deposits].sort(
+    (a, b) => Number(a.leafIndex) - Number(b.leafIndex),
+  )
+
+  for (const deposit of sorted) {
+    if (deposit.outputNoteData && deposit.outputNoteData.length > 2) {
+      noteStore.addChainNote({
+        leafIndex: Number(deposit.leafIndex),
+        encryptedData: deposit.outputNoteData,
+        commitment: deposit.noteCommitment,
+        kind: 'deposit',
+        amount: deposit.amount,
+        tokenAddress: deposit.tokenAddress,
+        originTag: deposit.originTag,
+      })
+    }
   }
 }

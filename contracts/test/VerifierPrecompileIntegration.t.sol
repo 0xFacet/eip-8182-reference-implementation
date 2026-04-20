@@ -49,15 +49,7 @@ contract VerifierPrecompileIntegrationTest is Test, InstallSystemTestBase {
 
         applyAcceptedRootSeed(acceptedRootSeed(publicInputs, block.number));
 
-        address depositor = address(uint160(publicInputs.depositorAddress));
-        vm.deal(depositor, publicInputs.publicAmountIn + 1 ether);
-
-        vm.prank(depositor);
-        pool.transact{value: publicInputs.publicAmountIn}(
-            proof, publicInputs, fixtureNoteData0, fixtureNoteData1, fixtureNoteData2
-        );
-
-        assertEq(address(pool).balance, publicInputs.publicAmountIn);
+        pool.transact(proof, publicInputs, fixtureNoteData0, fixtureNoteData1, fixtureNoteData2);
     }
 
     function _assertFixtureNoteDataHashes(ShieldedPool.PublicInputs memory publicInputs) private view {
@@ -67,27 +59,25 @@ contract VerifierPrecompileIntegrationTest is Test, InstallSystemTestBase {
     }
 
     function _fixturePublicInputs() private view returns (ShieldedPool.PublicInputs memory publicInputs) {
-        assertEq(fixturePublicInputs.length, 19);
+        assertEq(fixturePublicInputs.length, 17);
 
         publicInputs.noteCommitmentRoot = uint256(fixturePublicInputs[0]);
         publicInputs.nullifier0 = uint256(fixturePublicInputs[1]);
         publicInputs.nullifier1 = uint256(fixturePublicInputs[2]);
-        publicInputs.noteCommitment0 = uint256(fixturePublicInputs[3]);
-        publicInputs.noteCommitment1 = uint256(fixturePublicInputs[4]);
-        publicInputs.noteCommitment2 = uint256(fixturePublicInputs[5]);
-        publicInputs.publicAmountIn = uint256(fixturePublicInputs[6]);
-        publicInputs.publicAmountOut = uint256(fixturePublicInputs[7]);
-        publicInputs.publicRecipientAddress = uint256(fixturePublicInputs[8]);
-        publicInputs.publicTokenAddress = uint256(fixturePublicInputs[9]);
-        publicInputs.depositorAddress = uint256(fixturePublicInputs[10]);
-        publicInputs.transactionReplayId = uint256(fixturePublicInputs[11]);
-        publicInputs.registryRoot = uint256(fixturePublicInputs[12]);
-        publicInputs.validUntilSeconds = uint256(fixturePublicInputs[13]);
-        publicInputs.executionChainId = uint256(fixturePublicInputs[14]);
-        publicInputs.authPolicyRegistryRoot = uint256(fixturePublicInputs[15]);
-        publicInputs.outputNoteDataHash0 = uint256(fixturePublicInputs[16]);
-        publicInputs.outputNoteDataHash1 = uint256(fixturePublicInputs[17]);
-        publicInputs.outputNoteDataHash2 = uint256(fixturePublicInputs[18]);
+        publicInputs.noteBodyCommitment0 = uint256(fixturePublicInputs[3]);
+        publicInputs.noteBodyCommitment1 = uint256(fixturePublicInputs[4]);
+        publicInputs.noteBodyCommitment2 = uint256(fixturePublicInputs[5]);
+        publicInputs.publicAmountOut = uint256(fixturePublicInputs[6]);
+        publicInputs.publicRecipientAddress = uint256(fixturePublicInputs[7]);
+        publicInputs.publicTokenAddress = uint256(fixturePublicInputs[8]);
+        publicInputs.intentReplayId = uint256(fixturePublicInputs[9]);
+        publicInputs.registryRoot = uint256(fixturePublicInputs[10]);
+        publicInputs.validUntilSeconds = uint256(fixturePublicInputs[11]);
+        publicInputs.executionChainId = uint256(fixturePublicInputs[12]);
+        publicInputs.authPolicyRegistryRoot = uint256(fixturePublicInputs[13]);
+        publicInputs.outputNoteDataHash0 = uint256(fixturePublicInputs[14]);
+        publicInputs.outputNoteDataHash1 = uint256(fixturePublicInputs[15]);
+        publicInputs.outputNoteDataHash2 = uint256(fixturePublicInputs[16]);
     }
 
     function _noteDataHash(bytes memory noteData) private pure returns (uint256) {

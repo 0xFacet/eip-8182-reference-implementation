@@ -6,14 +6,12 @@ The local EIP markdown intentionally keeps upstream-style relative links. This b
 
 Files:
 
-- `poseidon_bn254_t3_rf8_rp57.json`
-  Normative Poseidon parameter asset for the BN254 `t=3`, `R_F=8`, `R_P=57` instance named by the EIP.
-- `poseidon_vectors.json`
-  Normative Poseidon `hash_2` and arity-prefixed `poseidon(...)` vectors derived from the repo’s reference helpers.
+- `poseidon2_bn254_t4_rf8_rp56.json`
+  Normative Poseidon2 parameter asset for the BN254 `t=4`, `R_F=8`, `R_P=56`, rate-3 sponge instance named by the EIP.
+- `poseidon2_vectors.json`
+  Normative Poseidon2 sponge vectors covering N ∈ {0, 1, 2, 3, 4, 5, 6, 17, 116}. Generated with `@aztec/bb.js`'s `poseidon2Hash` and verified bit-identical to Solidity (`Poseidon2Sponge.hash`) and Noir stdlib (`Poseidon2::hash`).
 - `shielded-pool-state.json`
-  Fork-activation state dump for `SHIELDED_POOL_ADDRESS`, generated from the local installer flow and filtered to the pool account only.
-- `poseidon_t3_runtime.hex`
-  Runtime prerequisite for the external `PoseidonT3` library address.
+  Fork-activation state dump for `SHIELDED_POOL_ADDRESS`, generated from the local installer flow and filtered to the pool account only. The shielded-pool runtime inlines Poseidon2; no external Poseidon contract is etched at activation.
 - `delivery_scheme1_vectors.json`
   Normative delivery-scheme `1` vectors for the pinned X-Wing + AES-256-GCM receive path.
 - `outer_vk.bin`

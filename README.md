@@ -9,6 +9,10 @@ This repo has one main idea:
 
 Everything else in the repo exists to support one of those two layers.
 
+## Deployment model
+
+This is a reference implementation of a system contract. It is installed at a fixed address by state dump at the activation fork (EIP-8182 §5.1), not deployed via CREATE/CREATE2, and therefore not subject to EIP-170's contract size limit.
+
 ## Toolchain requirements
 
 Exact versions matter. Wrong versions produce different verification keys, and proofs will not verify against the on-chain verifier.
@@ -29,6 +33,40 @@ Install the matching `bb` binary from the official release artifacts, then eithe
 
 - place it at `~/.bb/bb`
 - set `BB_BINARY=/absolute/path/to/bb`
+
+For example, on Apple Silicon macOS:
+
+```bash
+mkdir -p ~/.bb
+cd ~/.bb
+curl -fL -o barretenberg-arm64-darwin.tar.gz \
+  https://github.com/AztecProtocol/aztec-packages/releases/download/v4.0.0-nightly.20260120/barretenberg-arm64-darwin.tar.gz
+tar -xzf barretenberg-arm64-darwin.tar.gz
+chmod +x ~/.bb/bb
+```
+
+If you prefer `bbup`, the official installer is:
+
+```bash
+curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/next/barretenberg/bbup/install | bash
+bbup --version 4.0.0-nightly.20260120
+```
+
+If you prefer the same flow without piping `curl` to a shell:
+
+```bash
+mkdir -p /tmp/codex/bbup
+curl -fsSL -o /tmp/codex/bbup/install \
+  https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/next/barretenberg/bbup/install
+bash /tmp/codex/bbup/install
+~/.bb/bbup --version 4.0.0-nightly.20260120
+```
+
+`bbup` can also resolve from the Noir pin in `circuits/noir-toolchain.toml`:
+
+```bash
+~/.bb/bbup --noir-version 1.0.0-beta.19
+```
 
 Verify:
 
@@ -60,6 +98,9 @@ npm run test:unit
 
 ```bash
 npm run test:unit           # fast contract unit tests (mock verifier, no proofs)
+npm run test:execution-spec-assets # committed EIP asset bundle precompile vector
+npm run pyspec:test         # repo-local Python execution-spec slice checks
+npm run test:execution-specs # unit + pyspec + committed vectors + real verifier integration
 npm run test:slow           # unit + real verifier integration + smoke E2E
 npm run test:e2e:fullflow   # full deposit/transfer/withdraw flows with real proofs
 npm run test:all            # everything
@@ -72,10 +113,23 @@ npm run test:circuits       # Noir circuit tests (nargo test --workspace)
 npm run contracts:build              # forge build
 npm run contracts:verifier:refresh   # regenerate HonkVerifier.sol from current outer circuit
 npm run contracts:verifier:check     # check if HonkVerifier.sol is stale
+npm run execution-spec-assets:refresh # regenerate the repo-local EIP asset bundle
+npm run execution-spec-assets:check   # check if the EIP asset bundle is stale
+npm run execution-specs:check        # asset drift + verifier drift + pyspec + conformance tests
 npm run check:domains                # verify domain constant derivation
 npm run sync:domains                 # regenerate domain constants
 npm run check:eip712                 # verify EIP-712 type hash constants
 ```
+
+## Execution-Spec Assets
+
+`assets/eip-8182/` is the repo-local execution-layer bundle for this EIP. It packages the named activation and verifier artifacts plus committed conformance vectors without splitting the reference implementation into a second codebase.
+
+The local [eip-8182.md](eip-8182.md) keeps upstream-style relative links intentionally. This repo maps those links to the checked-in bundle under `assets/eip-8182/`; it does not rewrite the EIP copy just for local navigation.
+
+The Python slice under `pyspec/` is the repo-local execution-specs layer. It models the fork-visible surface: pinned assets, activation state, and the verifier precompile ABI/return semantics.
+
+The proof-backed vectors are real sample proofs, so those blobs are not byte-stable across regenerations. The asset check treats those files structurally, and the committed-vector contract suite verifies them against the local precompile simulation.
 
 ---
 
@@ -102,7 +156,7 @@ The outer circuit is the protocol kernel. It enforces:
 - deposit / transfer / withdrawal mode rules
 - note commitments and nullifiers
 - registry membership checks
-- intent nullifier derivation
+- transaction replay ID derivation
 - output-note-data hash binding
 - recursive verification of the inner proof
 - the exact public-input layout consumed by `ShieldedPool`
@@ -120,7 +174,7 @@ The inner circuit is the authorization plugin. It answers questions like:
 It does **not** implement pool settlement. It only proves authorization and returns two public outputs:
 
 - `authDataCommitment`
-- `intentDigest`
+- `transactionIntentDigest`
 
 The outer circuit consumes those two outputs and does the rest.
 
@@ -151,6 +205,9 @@ contracts/
   test/                      Foundry tests, including FFI-driven proof tests
   test/generated/            generated HonkVerifier (test-only precompile simulation)
   script/                    fixed-address installer / bootstrap script
+
+assets/eip-8182/             repo-local EIP asset bundle (activation + verifier artifacts)
+pyspec/                      repo-local Python execution-spec slice
 
 src/lib/                     TypeScript protocol-parity helpers
 integration/src/             host-side witness builders and proof runners
@@ -211,7 +268,7 @@ What stays the same:
 - the final output shape
 - the handoff to the outer circuit via `InnerOutputs`
 
-The outer circuit does not need to understand either policy struct. It only needs `auth_data_commitment` and `intent_digest`. Each policy module reduces itself to an `Authorization` with an `auth_data_commitment`, which the contract and outer circuit match against the registered auth-policy leaf.
+The outer circuit does not need to understand either policy struct. It only needs `auth_data_commitment` and `transaction_intent_digest`. Each policy module reduces itself to an `Authorization` with an `auth_data_commitment`, which the contract and outer circuit match against the registered auth-policy leaf.
 
 ## TypeScript layers
 
@@ -241,7 +298,7 @@ Key entrypoints: `prover/src/index.ts` (HTTP server), `prover/src/note_delivery.
 
 ## Installer
 
-`contracts/script/InstallSystemContracts.s.sol` runs a local system-install simulation: etches `ShieldedPool` to the fixed pool address, links to canonical PoseidonT3, bootstraps the empty-hash cache, and writes install artifacts.
+`contracts/script/InstallSystemContracts.s.sol` runs a local system-install simulation: etches `ShieldedPool` to the fixed pool address, bootstraps the empty-hash cache, and writes install artifacts. Poseidon2 is inlined into the pool runtime; there is no external Poseidon contract to link.
 
 ```bash
 cd contracts
@@ -254,4 +311,3 @@ Outputs: `contracts/script-output/shielded-pool-install.json` and `contracts/scr
 
 - System contract: `0x0000000000000000000000000000000000081820`
 - Proof verification precompile: `0x0000000000000000000000000000000000000030`
-- PoseidonT3: `0x3333333C0A88F9BE4fd23ed0536F9B6c427e3B93`

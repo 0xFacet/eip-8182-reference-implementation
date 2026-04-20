@@ -3,7 +3,7 @@ import { keccak_256 } from "@noble/hashes/sha3";
 import { XWing } from "@noble/post-quantum/hybrid.js";
 import {
   computeSingleSigAuthorizationSigningHash,
-  DEPOSIT_OPERATION_KIND,
+  TRANSFER_OPERATION_KIND,
   hexToBytes,
   secp256k1PubkeyToAddress,
   singleSigAuthDataCommitment,
@@ -60,7 +60,7 @@ async function main() {
     const authorizingAddress = secp256k1PubkeyToAddress(pubKeyX, pubKeyY);
     const semanticIntent = {
       policyVersion: 1n,
-      operationKind: DEPOSIT_OPERATION_KIND,
+      operationKind: TRANSFER_OPERATION_KIND,
       tokenAddress: 0n,
       recipientAddress: authorizingAddress,
       amount: 1n,

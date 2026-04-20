@@ -1,11 +1,11 @@
-// Unified outer circuit for EIP-8182 demo.
-// Handles all three operation modes: deposit, transfer, withdrawal.
-// 3 output slots: slot 0 = recipient/change, slot 1 = change/dummy, slot 2 = fee/dummy.
-// 19 public inputs. Recursively verifies the inner auth proof.
+// Outer circuit for EIP-8182.
+// Handles transfer and withdrawal. Deposits are contract-native and do not
+// involve this circuit (EIP Section 4, Section 5.3).
+//
+// 17 public inputs per EIP Section 10. Recursively verifies the inner auth proof.
 
 use bb_proof_verification::{UltraHonkVerificationKey, UltraHonkZKProof, verify_honk_proof};
 use privacy_pool_common::constants::{
-    DEPOSIT_OP,
     LOCK_OUTPUT_BINDING_0,
     LOCK_OUTPUT_BINDING_1,
     LOCK_OUTPUT_BINDING_2,
@@ -15,18 +15,19 @@ use privacy_pool_common::constants::{
 use privacy_pool_common::digest::{
     output_binding,
     transaction_intent_digest as common_transaction_intent_digest,
-    transaction_replay_id as common_transaction_replay_id,
+    intent_replay_id as common_intent_replay_id,
 };
 use privacy_pool_common::hash_utils::hash_vk;
 use privacy_pool_common::note::{
     assert_origin_mode_constraints,
-    deposit_origin_tag,
     dummy_owner_nullifier_key_hash,
+    full_note_commitment,
+    note_body_commitment,
     note_nullifier,
     origin_tag_for_spend,
-    note_commitment,
     note_secret,
     note_secret_seed_hash,
+    owner_commitment,
     owner_nullifier_key_hash,
     phantom_nullifier,
 };
@@ -48,19 +49,17 @@ use privacy_pool_common::types::{
 };
 
 fn main(
-    // --- 19 public inputs ---
+    // --- 17 public inputs per EIP Section 10 ---
     note_commitment_root: pub Field,
     nullifier0_out: pub Field,
     nullifier1_out: pub Field,
-    note_commitment0_out: pub Field,
-    note_commitment1_out: pub Field,
-    note_commitment2_out: pub Field,
-    public_amount_in: pub Field,
+    note_body_commitment0_out: pub Field,
+    note_body_commitment1_out: pub Field,
+    note_body_commitment2_out: pub Field,
     public_amount_out: pub Field,
     public_recipient: pub Field,
     public_token_address: pub Field,
-    depositor_address: pub Field,
-    transaction_replay_id: pub Field,
+    intent_replay_id: pub Field,
     registry_root: pub Field,
     valid_until_seconds: pub Field,
     execution_chain_id: pub Field,
@@ -111,7 +110,7 @@ fn main(
     fee_recipient_address: Field,   // from signed intent (may be 0)
     fee_amount: Field,              // from signed intent
     origin_mode: Field, // signer-selected origin handling mode
-    fee_note_owner: Field,          // prover-chosen fee note recipient (constrained below)
+    fee_note_recipient_address: Field,          // prover-chosen fee note recipient (constrained below)
 ) {
     // == Common assertions ==
     assert(valid_until_seconds != 0);
@@ -125,7 +124,7 @@ fn main(
     assert_address(transfer_recipient_address);
     assert_address(private_token_address);
     assert_address(fee_recipient_address);
-    assert_amount(public_amount_in);
+    assert_address(fee_note_recipient_address);
     assert_amount(public_amount_out);
     assert_amount(payment_amount);
     assert_amount(change_amount);
@@ -135,31 +134,19 @@ fn main(
     assert_execution_constraints_flags(execution_constraints_flags);
     execution_constraints_flags.assert_max_bit_size::<3>();
 
-    // == Mode selection ==
-    let is_deposit = depositor_address != 0;
-    let is_withdrawal = !is_deposit & (public_amount_out != 0);
-    let is_transfer = !is_deposit & !is_withdrawal;
+    // == Mode selection (transfer vs withdrawal only) ==
+    let is_withdrawal = public_amount_out != 0;
+    let is_transfer = !is_withdrawal;
 
     // == Mode-specific assertions ==
-    if is_deposit {
-        assert(public_amount_in != 0);
-        assert(public_amount_out == 0);
-        assert(public_recipient == 0);
-        assert(authorizing_address == depositor_address);
-        assert_address(depositor_address);
-    } else if is_transfer {
-        assert(public_amount_in == 0);
-        assert(public_amount_out == 0);
+    if is_transfer {
         assert(public_recipient == 0);
         assert(public_token_address == 0);
-        assert(depositor_address == 0);
         assert(payment_amount != 0);
         assert(transfer_recipient_address != 0);
     } else {
         // withdrawal
-        assert(public_amount_in == 0);
         assert(public_recipient != 0);
-        assert(depositor_address == 0);
         assert(payment_amount == 0);
     }
 
@@ -177,7 +164,7 @@ fn main(
     let auth_root = auth_membership_root(authorizing_address, inner_vk_hash, auth_leaf, auth_witness);
     assert(auth_root == auth_policy_registry_root, "auth policy root mismatch");
 
-    // == Sender/depositor registry binding (all modes) ==
+    // == Sender registry binding (all modes) ==
     let sender_root = user_registry_membership_root(authorizing_address, sender_leaf, sender_witness);
     assert(sender_root == registry_root, "sender root mismatch");
 
@@ -186,33 +173,25 @@ fn main(
     assert(sender_leaf.note_secret_seed_hash == note_secret_seed_hash(note_secret_seed));
 
     // == Determine token, recipient, amount based on mode ==
-    let token_address = if is_deposit {
-        public_token_address
-    } else if is_transfer {
+    let token_address = if is_transfer {
         private_token_address
     } else {
         public_token_address
     };
 
-    let recipient_address = if is_deposit {
-        transfer_recipient_address
-    } else if is_transfer {
+    let recipient_address = if is_transfer {
         transfer_recipient_address
     } else {
         public_recipient
     };
 
-    let authorized_amount = if is_deposit {
-        payment_amount
-    } else if is_transfer {
+    let authorized_amount = if is_transfer {
         payment_amount
     } else {
         public_amount_out
     };
 
-    let operation_kind = if is_deposit {
-        DEPOSIT_OP
-    } else if is_transfer {
+    let operation_kind = if is_transfer {
         TRANSFER_OP
     } else {
         WITHDRAWAL_OP
@@ -238,17 +217,17 @@ fn main(
         execution_chain_id,
     );
 
-    // == Transaction replay id (all modes) ==
-    let transaction_replay_id_value = common_transaction_replay_id(
+    // == Intent replay id (all modes) ==
+    let intent_replay_id_value = common_intent_replay_id(
         owner_nullifier_key,
         authorizing_address,
         execution_chain_id,
         nonce,
     );
-    assert(transaction_replay_id_value == transaction_replay_id);
+    assert(intent_replay_id_value == intent_replay_id);
 
-    // == Recipient registry proof (deposit + transfer only) ==
-    if is_deposit | is_transfer {
+    // == Recipient registry proof (transfer only) ==
+    if is_transfer {
         let recipient_root = user_registry_membership_root(recipient_address, recipient_leaf, recipient_witness);
         assert(recipient_root == registry_root);
     }
@@ -257,54 +236,50 @@ fn main(
     let has_fee = fee_amount != 0;
 
     if has_fee {
-        // Constrain fee_note_owner based on fee_recipient_address
+        // Constrain fee_note_recipient_address based on fee_recipient_address
         if fee_recipient_address != 0 {
-            assert(fee_note_owner == fee_recipient_address);
+            assert(fee_note_recipient_address == fee_recipient_address);
         } else {
-            assert(fee_note_owner != 0);
-            assert_address(fee_note_owner);
+            assert(fee_note_recipient_address != 0);
         }
         // Fee note recipient registry proof
-        let sponsor_root = user_registry_membership_root(fee_note_owner, sponsor_leaf, sponsor_witness);
+        let sponsor_root = user_registry_membership_root(fee_note_recipient_address, sponsor_leaf, sponsor_witness);
         assert(sponsor_root == registry_root);
     } else {
         assert(fee_recipient_address == 0);
+        assert(fee_note_recipient_address == 0);
     }
 
     // == Input notes ==
-    if is_deposit {
-        assert(input0.is_phantom);
-        assert(input1.is_phantom);
-    } else {
-        assert(!(input0.is_phantom & input1.is_phantom));
-    }
+    assert(!(input0.is_phantom & input1.is_phantom));
 
+    // The new nullifier (EIP Section 7.6) binds to the FINAL leaf-sealed note
+    // commitment, so the prover must witness each input's `leaf_index` and we
+    // rebuild the three-layer commitment for each real input.
     let nullifier0 = if input0.is_phantom {
         assert(input0.note.amount == 0);
-        phantom_nullifier(owner_nullifier_key, transaction_replay_id_value, 0)
+        phantom_nullifier(owner_nullifier_key, intent_replay_id_value, 0)
     } else {
         assert_amount(input0.note.amount);
-        assert(input0.note.owner_address == authorizing_address);
         assert(input0.note.owner_nullifier_key_hash == sender_leaf.owner_nullifier_key_hash);
         assert(input0.note.token_address == token_address);
-        let leaf0 = note_commitment(input0.note);
+        let leaf0 = full_note_commitment(input0.note, input0.leaf_index as Field);
         let root0 = privacy_pool_common::merkle::merkle_root_from_index(leaf0, input0.leaf_index, input0.siblings);
         assert(root0 == note_commitment_root);
-        note_nullifier(owner_nullifier_key, input0.note.note_secret)
+        note_nullifier(leaf0, owner_nullifier_key)
     };
 
     let nullifier1 = if input1.is_phantom {
         assert(input1.note.amount == 0);
-        phantom_nullifier(owner_nullifier_key, transaction_replay_id_value, 1)
+        phantom_nullifier(owner_nullifier_key, intent_replay_id_value, 1)
     } else {
         assert_amount(input1.note.amount);
-        assert(input1.note.owner_address == authorizing_address);
         assert(input1.note.owner_nullifier_key_hash == sender_leaf.owner_nullifier_key_hash);
         assert(input1.note.token_address == token_address);
-        let leaf1 = note_commitment(input1.note);
+        let leaf1 = full_note_commitment(input1.note, input1.leaf_index as Field);
         let root1 = privacy_pool_common::merkle::merkle_root_from_index(leaf1, input1.leaf_index, input1.siblings);
         assert(root1 == note_commitment_root);
-        note_nullifier(owner_nullifier_key, input1.note.note_secret)
+        note_nullifier(leaf1, owner_nullifier_key)
     };
 
     assert(nullifier0 == nullifier0_out);
@@ -312,63 +287,36 @@ fn main(
     assert(nullifier0 != nullifier1);
 
     // == Note secrets (all modes, from noteSecretSeed) ==
-    let out0_note_secret = note_secret(note_secret_seed, transaction_replay_id_value, 0);
-    let out1_note_secret = note_secret(note_secret_seed, transaction_replay_id_value, 1);
-    let out2_note_secret = note_secret(note_secret_seed, transaction_replay_id_value, 2);
+    let out0_note_secret = note_secret(note_secret_seed, intent_replay_id_value, 0);
+    let out1_note_secret = note_secret(note_secret_seed, intent_replay_id_value, 1);
+    let out2_note_secret = note_secret(note_secret_seed, intent_replay_id_value, 2);
 
     // == Origin tag derivation ==
-    let propagated_origin_tag = if is_deposit {
-        0
-    } else {
-        origin_tag_for_spend(
-            input0.is_phantom,
-            input0.note.origin_tag,
-            input1.is_phantom,
-            input1.note.origin_tag,
-        )
-    };
-    let deposit_origin_tag_value = deposit_origin_tag(
-        execution_chain_id,
-        depositor_address,
-        token_address,
-        public_amount_in,
-        transaction_replay_id_value,
+    // Deposits are contract-native, so the circuit only propagates tags from
+    // spent inputs to outputs.
+    let origin_tag = origin_tag_for_spend(
+        input0.is_phantom,
+        input0.note.origin_tag,
+        input1.is_phantom,
+        input1.note.origin_tag,
     );
-    let origin_tag = if is_deposit {
-        if origin_mode == 0 { 0 } else { deposit_origin_tag_value }
-    } else {
-        propagated_origin_tag
-    };
 
     // == Value conservation ==
     let input0_amount = if input0.is_phantom { 0 } else { input0.note.amount };
     let input1_amount = if input1.is_phantom { 0 } else { input1.note.amount };
-    let input_sum = input0_amount + input1_amount + public_amount_in;
+    let input_sum = input0_amount + input1_amount;
 
-    // == Output slot 0: recipient (deposit/transfer) or change (withdrawal) or dummy ==
-    let out0_is_dummy = if is_deposit {
-        false
-    } else if is_transfer {
+    // == Output slot 0: recipient (transfer) or change (withdrawal) or dummy ==
+    let out0_is_dummy = if is_transfer {
         false
     } else {
         change_amount == 0
     };
 
-    let out0 = if is_deposit {
-        // Deposit: recipient note (amount from intent, not publicAmountIn which includes fee)
-        Note {
-            amount: authorized_amount,
-            owner_address: recipient_address,
-            note_secret: out0_note_secret,
-            owner_nullifier_key_hash: recipient_leaf.owner_nullifier_key_hash,
-            token_address,
-            origin_tag,
-        }
-    } else if is_transfer {
+    let out0 = if is_transfer {
         // Transfer: recipient note
         Note {
             amount: payment_amount,
-            owner_address: recipient_address,
             note_secret: out0_note_secret,
             owner_nullifier_key_hash: recipient_leaf.owner_nullifier_key_hash,
             token_address,
@@ -377,7 +325,6 @@ fn main(
     } else if out0_is_dummy {
         Note {
             amount: 0,
-            owner_address: 0,
             note_secret: out0_note_secret,
             owner_nullifier_key_hash: dummy_owner_nullifier_key_hash(),
             token_address: 0,
@@ -387,7 +334,6 @@ fn main(
         // Withdrawal with change
         Note {
             amount: change_amount,
-            owner_address: authorizing_address,
             note_secret: out0_note_secret,
             owner_nullifier_key_hash: sender_leaf.owner_nullifier_key_hash,
             token_address,
@@ -396,9 +342,7 @@ fn main(
     };
 
     // == Output slot 1: change (transfer) or dummy ==
-    let out1_is_dummy = if is_deposit {
-        true
-    } else if is_transfer {
+    let out1_is_dummy = if is_transfer {
         change_amount == 0
     } else {
         true
@@ -407,7 +351,6 @@ fn main(
     let out1 = if out1_is_dummy {
         Note {
             amount: 0,
-            owner_address: 0,
             note_secret: out1_note_secret,
             owner_nullifier_key_hash: dummy_owner_nullifier_key_hash(),
             token_address: 0,
@@ -417,7 +360,6 @@ fn main(
         // Transfer change note
         Note {
             amount: change_amount,
-            owner_address: authorizing_address,
             note_secret: out1_note_secret,
             owner_nullifier_key_hash: sender_leaf.owner_nullifier_key_hash,
             token_address,
@@ -431,7 +373,6 @@ fn main(
     let out2 = if out2_is_dummy {
         Note {
             amount: 0,
-            owner_address: 0,
             note_secret: out2_note_secret,
             owner_nullifier_key_hash: dummy_owner_nullifier_key_hash(),
             token_address: 0,
@@ -440,7 +381,6 @@ fn main(
     } else {
         Note {
             amount: fee_amount,
-            owner_address: fee_note_owner,
             note_secret: out2_note_secret,
             owner_nullifier_key_hash: sponsor_leaf.owner_nullifier_key_hash,
             token_address,
@@ -454,7 +394,6 @@ fn main(
 
     assert_origin_mode_constraints(
         origin_mode,
-        is_deposit,
         input0.is_phantom,
         input0.note.origin_tag,
         input1.is_phantom,
@@ -471,22 +410,27 @@ fn main(
     let output_sum = out0.amount + out1.amount + out2.amount;
     assert(input_sum == output_sum + public_amount_out);
 
-    // == Deposit-specific: publicAmountIn == amount + feeAmount ==
-    if is_deposit {
-        assert(public_amount_in == authorized_amount + fee_amount);
-    }
+    // == Output body-commitment binding ==
+    // The circuit exposes body commitments as public inputs; the contract
+    // seals in the assigned leaf index to produce the final note commitment.
+    let owner_commit0 = owner_commitment(out0.owner_nullifier_key_hash, out0.note_secret);
+    let owner_commit1 = owner_commitment(out1.owner_nullifier_key_hash, out1.note_secret);
+    let owner_commit2 = owner_commitment(out2.owner_nullifier_key_hash, out2.note_secret);
 
-    // == Commitment binding ==
-    let note_commitment0 = note_commitment(out0);
-    let note_commitment1 = note_commitment(out1);
-    let note_commitment2 = note_commitment(out2);
-    assert(note_commitment0 == note_commitment0_out);
-    assert(note_commitment1 == note_commitment1_out);
-    assert(note_commitment2 == note_commitment2_out);
+    let body0 = note_body_commitment(owner_commit0, out0.amount, out0.token_address, out0.origin_tag);
+    let body1 = note_body_commitment(owner_commit1, out1.amount, out1.token_address, out1.origin_tag);
+    let body2 = note_body_commitment(owner_commit2, out2.amount, out2.token_address, out2.origin_tag);
 
-    let output_binding0 = output_binding(note_commitment0, output_note_data_hash0);
-    let output_binding1 = output_binding(note_commitment1, output_note_data_hash1);
-    let output_binding2 = output_binding(note_commitment2, output_note_data_hash2);
+    assert(body0 == note_body_commitment0_out);
+    assert(body1 == note_body_commitment1_out);
+    assert(body2 == note_body_commitment2_out);
+
+    // EIP Section 7.7: output binding hashes the body commitment, not the final
+    // (leaf-sealed) commitment. This lets the signer lock a slot without
+    // knowing the contract-assigned leaf index.
+    let output_binding0 = output_binding(body0, output_note_data_hash0);
+    let output_binding1 = output_binding(body1, output_note_data_hash1);
+    let output_binding2 = output_binding(body2, output_note_data_hash2);
 
     assert_output_binding_lock(
         execution_constraints_flags,

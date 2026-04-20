@@ -24,19 +24,19 @@ contract ShieldedPoolInstallHarness is ShieldedPool {
         noteCommitmentEmptyHashes[0] = 0;
         for (uint256 level = 1; level < COMMITMENT_TREE_DEPTH; ++level) {
             noteCommitmentEmptyHashes[level] =
-                PoseidonFieldLib.hash2Raw(noteCommitmentEmptyHashes[level - 1], noteCommitmentEmptyHashes[level - 1]);
+                PoseidonFieldLib.merkleHash(noteCommitmentEmptyHashes[level - 1], noteCommitmentEmptyHashes[level - 1]);
         }
 
         sparseEmptyHashes[0] = 0;
         for (uint256 level = 1; level < REGISTRY_TREE_DEPTH; ++level) {
             sparseEmptyHashes[level] =
-                PoseidonFieldLib.hash2Raw(sparseEmptyHashes[level - 1], sparseEmptyHashes[level - 1]);
+                PoseidonFieldLib.merkleHash(sparseEmptyHashes[level - 1], sparseEmptyHashes[level - 1]);
         }
     }
 
     function _deriveEmptyRoot(uint256 depth) private pure returns (uint256 root) {
         for (uint256 level; level < depth; ++level) {
-            root = PoseidonFieldLib.hash2Raw(root, root);
+            root = PoseidonFieldLib.merkleHash(root, root);
         }
     }
 }
@@ -45,11 +45,8 @@ abstract contract InstallSystemContractsBase is CommonBase {
     uint256 internal constant INSTALL_COMMITMENT_TREE_DEPTH = 32;
     uint256 internal constant INSTALL_REGISTRY_TREE_DEPTH = 160;
     address internal constant POOL_ADDRESS = 0x0000000000000000000000000000000000081820;
-    address internal constant POSEIDON_LIBRARY_ADDRESS = 0x3333333C0A88F9BE4fd23ed0536F9B6c427e3B93;
-    string internal constant POSEIDON_RUNTIME_FIXTURE_PATH = "test/fixtures/poseidon_t3_runtime.hex";
 
     function install() internal returns (uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot) {
-        _installPoseidonLibrary();
         _initializePool();
         (noteCommitmentRoot, userRegistryRoot, authPolicyRoot) = ShieldedPool(POOL_ADDRESS).getCurrentRoots();
         _assertExpectedRoots(noteCommitmentRoot, userRegistryRoot, authPolicyRoot);
@@ -86,13 +83,6 @@ abstract contract InstallSystemContractsBase is CommonBase {
         vm.setNonce(POOL_ADDRESS, 1);
     }
 
-    function _installPoseidonLibrary() internal {
-        string memory poseidonRuntimeHex = vm.trim(vm.readFile(POSEIDON_RUNTIME_FIXTURE_PATH));
-        bytes memory poseidonCode = vm.parseBytes(poseidonRuntimeHex);
-        require(poseidonCode.length != 0, "empty poseidon code");
-        vm.etch(POSEIDON_LIBRARY_ADDRESS, poseidonCode);
-    }
-
     function _assertExpectedRoots(uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot) private pure {
         uint256 expectedCommitmentRoot = _deriveEmptyRoot(INSTALL_COMMITMENT_TREE_DEPTH);
         uint256 expectedSparseRoot = _deriveEmptyRoot(INSTALL_REGISTRY_TREE_DEPTH);
@@ -104,7 +94,7 @@ abstract contract InstallSystemContractsBase is CommonBase {
 
     function _deriveEmptyRoot(uint256 depth) private pure returns (uint256 root) {
         for (uint256 level; level < depth; ++level) {
-            root = PoseidonFieldLib.hash2Raw(root, root);
+            root = PoseidonFieldLib.merkleHash(root, root);
         }
     }
 
