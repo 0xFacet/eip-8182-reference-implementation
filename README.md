@@ -287,7 +287,7 @@ Both are called by the Solidity E2E tests via Foundry FFI.
 
 ## Prover sidecar
 
-`prover/` is an optional, non-normative demo sidecar for delegated proving and note delivery. It is not part of the release validation surface. It supports only the baseline `eip712` inner circuit, delivery scheme `1` (X-Wing), and zero execution constraints.
+`prover/` is an optional, non-normative demo sidecar for delegated proving and note delivery. It is not part of the release validation surface. It supports only the baseline `eip712` inner circuit, delivery scheme `1` (ML-KEM-768), and zero execution constraints.
 
 ```bash
 npm run prover:start    # start the prover
