@@ -8,13 +8,13 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import os from "os";
-import { XWing } from "@noble/post-quantum/hybrid.js";
+import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import { extract, expand } from "@noble/hashes/hkdf";
 import { sha256 } from "@noble/hashes/sha256";
 import { createCipheriv, randomBytes } from "crypto";
 import { execSync } from "child_process";
 import {
-  DELIVERY_SCHEME_X_WING,
+  DELIVERY_SCHEME_ML_KEM_768,
   bytesToHex,
   defaultExecutionConstraints,
   FIELD_MODULUS,
@@ -29,7 +29,7 @@ import {
   PROTOCOL_VERIFYING_CONTRACT_FIELD,
   TRANSFER_OPERATION_KIND,
   WITHDRAWAL_OPERATION_KIND,
-  X_WING_PUBLIC_KEY_LENGTH,
+  ML_KEM_768_PUBLIC_KEY_LENGTH,
 } from "../../src/lib/protocol.ts";
 import {
   AUTH_POLICY_DOMAIN,
@@ -359,9 +359,9 @@ export function resolveRegisteredDeliveryPubKey(
 ): string | undefined {
   if (!keyValue) return undefined;
   const normalizedKey = bytesToHex(hexToBytes(keyValue));
-  if (hexToBytes(normalizedKey).length !== X_WING_PUBLIC_KEY_LENGTH) return undefined;
+  if (hexToBytes(normalizedKey).length !== ML_KEM_768_PUBLIC_KEY_LENGTH) return undefined;
   if (schemeIdValue === undefined) return normalizedKey;
-  return toBigInt(schemeIdValue, 0n) === DELIVERY_SCHEME_X_WING
+  return toBigInt(schemeIdValue, 0n) === DELIVERY_SCHEME_ML_KEM_768
     ? normalizedKey
     : undefined;
 }
@@ -996,8 +996,10 @@ export function computeAuthVkHash(vkWords: bigint[], pHash: PoseidonHelpers["pHa
   return pHash([AUTH_VK_DOMAIN, ...vkWords]);
 }
 
-// Scheme 1A wire format: enc (1120) || ciphertext (160) || tag (16) = 1296 bytes.
-const SCHEME_1A_TOTAL_LENGTH = 1296;
+// Scheme 1A wire format: enc (1088) || ciphertext (160) || tag (16) = 1264 bytes.
+const SCHEME_1_ENC_LENGTH = 1088;
+const SCHEME_1A_PLAINTEXT_LENGTH = 160;
+const SCHEME_1A_TOTAL_LENGTH = SCHEME_1_ENC_LENGTH + SCHEME_1A_PLAINTEXT_LENGTH + 16;
 
 function encryptNoteData(note: TransactionNote, deliveryKey?: string): EncryptedNoteData {
   if (note.amount === 0n) {
@@ -1008,15 +1010,15 @@ function encryptNoteData(note: TransactionNote, deliveryKey?: string): Encrypted
     throw new Error("deliveryPubKey required for non-dummy notes");
   }
   const pubKey = hexToBytes(deliveryKey);
-  const { sharedSecret, cipherText } = XWing.encapsulate(pubKey);
+  const { sharedSecret, cipherText } = ml_kem768.encapsulate(pubKey);
   const { key, nonce } = deriveKeyAndNonce(sharedSecret);
   const cipher = createCipheriv("aes-256-gcm", key, nonce);
   const ct = Buffer.concat([cipher.update(encodeNote(note)), cipher.final()]);
   const tag = cipher.getAuthTag();
   const result = new Uint8Array(SCHEME_1A_TOTAL_LENGTH);
   result.set(cipherText, 0);
-  result.set(ct, 1120); // 160-byte ciphertext
-  result.set(tag, 1280);
+  result.set(ct, SCHEME_1_ENC_LENGTH);
+  result.set(tag, SCHEME_1_ENC_LENGTH + SCHEME_1A_PLAINTEXT_LENGTH);
   return { data: result, hash: noteDataHash(result) };
 }
 

@@ -1,5 +1,5 @@
 import * as secp from "@noble/secp256k1";
-import { XWing } from "@noble/post-quantum/hybrid.js";
+import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import { writeFileSync } from "fs";
 import { resolve } from "path";
 import os from "os";
@@ -35,7 +35,8 @@ const COMMITMENT_DEPTH = PROTOCOL_COMMITMENT_TREE_DEPTH;
 const FIXTURE_PRIVATE_KEY_HEX =
   "1111111111111111111111111111111111111111111111111111111111111111";
 const FIXTURE_DELIVERY_SEED_HEX =
-  "2222222222222222222222222222222222222222222222222222222222222222";
+  "2222222222222222222222222222222222222222222222222222222222222222" +
+  "3333333333333333333333333333333333333333333333333333333333333333";
 
 const FIXTURE_NK = 0x9999n;
 const FIXTURE_NSS = 0xbeefn;
@@ -61,7 +62,7 @@ async function main() {
     pubKeyY,
     helpers.pHash,
   );
-  const { publicKey: deliveryPubKey } = XWing.keygen(hexToBytes(FIXTURE_DELIVERY_SEED_HEX));
+  const { publicKey: deliveryPubKey } = ml_kem768.keygen(hexToBytes(FIXTURE_DELIVERY_SEED_HEX));
   const deliveryPubKeyHex =
     "0x" +
     Array.from(deliveryPubKey)

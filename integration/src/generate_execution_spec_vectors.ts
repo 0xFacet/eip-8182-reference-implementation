@@ -7,10 +7,10 @@ import { ethers } from "ethers";
 import { extract, expand } from "@noble/hashes/hkdf";
 import { sha256 } from "@noble/hashes/sha256";
 import { keccak_256 } from "@noble/hashes/sha3";
-import { XWing } from "@noble/post-quantum/hybrid.js";
+import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 
 import {
-  DELIVERY_SCHEME_X_WING,
+  DELIVERY_SCHEME_ML_KEM_768,
   FIELD_MODULUS,
   ORIGIN_TAG_DOMAIN,
   bytesToHex,
@@ -65,12 +65,8 @@ const MALFORMED_INPUT_NOTE =
   "Verifier-precompile reject vector. The calldata is malformed and must return empty bytes.";
 const NON_CANONICAL_PRECOMPILE_NOTE =
   "Verifier-precompile reject vector. The public input is non-canonical and must return empty bytes.";
-const DELIVERY_KEYGEN_SEED_HEX =
-  "0x1111111111111111111111111111111111111111111111111111111111111111";
-const DELIVERY_ENCAPSULATION_RANDOMNESS_HEX =
-  "0x" +
-  "22".repeat(32) +
-  "33".repeat(32);
+const DELIVERY_KEYGEN_SEED_HEX = "0x" + "11".repeat(64);
+const DELIVERY_ENCAPSULATION_RANDOMNESS_HEX = "0x" + "22".repeat(32);
 
 async function main() {
   const [outputDirArg, verifierFixturePathArg, bbVersion] = process.argv.slice(2);
@@ -313,13 +309,13 @@ function buildPoseidonVectors(_helpers: Awaited<ReturnType<typeof createPoseidon
 function buildDeliveryVectors(helpers: Awaited<ReturnType<typeof createPoseidonHelpers>>) {
   return {
     aead: "aes-256-gcm",
-    draftRevision: "draft-connolly-cfrg-xwing-kem-10",
+    kemSpecification: "FIPS-203-final",
     hkdfHash: "sha256",
     keyLabel: DELIVERY_KEY_LABEL,
-    keyLengthBytes: 1216,
-    kemCiphertextLengthBytes: 1120,
+    keyLengthBytes: 1184,
+    kemCiphertextLengthBytes: 1088,
     nonceLabel: DELIVERY_NONCE_LABEL,
-    schemeId: Number(DELIVERY_SCHEME_X_WING),
+    schemeId: Number(DELIVERY_SCHEME_ML_KEM_768),
     subtypes: {
       "1A": buildScheme1ATransactVector(helpers),
       "1B": buildScheme1BDepositVector(helpers),
@@ -348,8 +344,8 @@ function buildScheme1ATransactVector(
     leafIndex,
   });
 
-  // Scheme 1A wire format: enc(1120) || ciphertext(160) || tag(16) = 1296 bytes.
-  const sealed = sealDeliveryPayload(plaintext, 1296);
+  // Scheme 1A wire format: enc(1088) || ciphertext(160) || tag(16) = 1264 bytes.
+  const sealed = sealDeliveryPayload(plaintext, 1264);
   const recoveredPlaintext = openDeliveryPayload(sealed, plaintext.length);
   const recoveredNote = decodeScheme1ANote(recoveredPlaintext);
   const recoveredCommitment = computeFullNoteCommitment(helpers.pHash, {
@@ -366,13 +362,14 @@ function buildScheme1ATransactVector(
 
   return {
     plaintextLengthBytes: 160,
-    ciphertextLengthBytes: 1296,
+    ciphertextLengthBytes: 1264,
     vectors: [
       {
         aeadKey: bytesToHex(sealed.key),
         ciphertext: bytesToHex(sealed.ciphertext),
         encapsulationCiphertext: bytesToHex(sealed.cipherText),
         encapsulationRandomness: DELIVERY_ENCAPSULATION_RANDOMNESS_HEX,
+        keygenSeed: DELIVERY_KEYGEN_SEED_HEX,
         leafIndex: toHex32(leafIndex),
         nonce: bytesToHex(sealed.nonce),
         note: formatNote(note),
@@ -381,7 +378,7 @@ function buildScheme1ATransactVector(
         outputNoteDataHash: toHex32(noteDataHash(sealed.outputNoteData)),
         plaintext: bytesToHex(plaintext),
         recipientPublicKey: bytesToHex(sealed.publicKey),
-        recipientSecretKeySeed: bytesToHex(sealed.secretKey),
+        recipientSecretKey: bytesToHex(sealed.secretKey),
         recoveredNote: formatNote(recoveredNote),
         sharedSecret: bytesToHex(sealed.sharedSecret),
         tag: bytesToHex(sealed.tag),
@@ -421,8 +418,8 @@ function buildScheme1BDepositVector(
     leafIndex,
   });
 
-  // Scheme 1B wire format: enc(1120) || ciphertext(64) || tag(16) = 1200 bytes.
-  const sealed = sealDeliveryPayload(plaintext, 1200);
+  // Scheme 1B wire format: enc(1088) || ciphertext(64) || tag(16) = 1168 bytes.
+  const sealed = sealDeliveryPayload(plaintext, 1168);
   const recoveredPlaintext = openDeliveryPayload(sealed, plaintext.length);
   const recoveredPayload = decodeScheme1BDepositPayload(recoveredPlaintext);
   const recoveredCommitment = computeFullNoteCommitment(helpers.pHash, {
@@ -439,7 +436,7 @@ function buildScheme1BDepositVector(
 
   return {
     plaintextLengthBytes: 64,
-    ciphertextLengthBytes: 1200,
+    ciphertextLengthBytes: 1168,
     vectors: [
       {
         aeadKey: bytesToHex(sealed.key),
@@ -449,6 +446,7 @@ function buildScheme1BDepositVector(
         depositor: toHex32(depositor),
         encapsulationCiphertext: bytesToHex(sealed.cipherText),
         encapsulationRandomness: DELIVERY_ENCAPSULATION_RANDOMNESS_HEX,
+        keygenSeed: DELIVERY_KEYGEN_SEED_HEX,
         leafIndex: toHex32(leafIndex),
         nonce: bytesToHex(sealed.nonce),
         noteCommitment: toHex32(noteCommitment),
@@ -459,7 +457,7 @@ function buildScheme1BDepositVector(
         plaintextOwnerNullifierKeyHash: toHex32(ownerNullifierKeyHash),
         plaintextNoteSecret: toHex32(noteSecret),
         recipientPublicKey: bytesToHex(sealed.publicKey),
-        recipientSecretKeySeed: bytesToHex(sealed.secretKey),
+        recipientSecretKey: bytesToHex(sealed.secretKey),
         sharedSecret: bytesToHex(sealed.sharedSecret),
         tag: bytesToHex(sealed.tag),
         tokenAddress: toHex32(tokenAddress),
@@ -486,8 +484,8 @@ function sealDeliveryPayload(
 ): SealedDeliveryPayload {
   const keygenSeed = hexToBytes(DELIVERY_KEYGEN_SEED_HEX);
   const encapsulationRandomness = hexToBytes(DELIVERY_ENCAPSULATION_RANDOMNESS_HEX);
-  const { secretKey, publicKey } = XWing.keygen(keygenSeed);
-  const { sharedSecret, cipherText } = XWing.encapsulate(publicKey, encapsulationRandomness);
+  const { secretKey, publicKey } = ml_kem768.keygen(keygenSeed);
+  const { sharedSecret, cipherText } = ml_kem768.encapsulate(publicKey, encapsulationRandomness);
   const { key, nonce } = deriveKeyAndNonce(sharedSecret);
 
   const cipher = createCipheriv("aes-256-gcm", Buffer.from(key), Buffer.from(nonce));
@@ -514,7 +512,7 @@ function openDeliveryPayload(
   sealed: SealedDeliveryPayload,
   plaintextLength: number,
 ): Uint8Array {
-  const decapsulated = XWing.decapsulate(sealed.cipherText, sealed.secretKey);
+  const decapsulated = ml_kem768.decapsulate(sealed.cipherText, sealed.secretKey);
   if (bytesToHex(decapsulated) !== bytesToHex(sealed.sharedSecret)) {
     throw new Error("delivery vector decapsulation mismatch");
   }

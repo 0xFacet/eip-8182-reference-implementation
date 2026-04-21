@@ -13,7 +13,7 @@ Files:
 - `shielded-pool-state.json`
   Fork-activation state dump for `SHIELDED_POOL_ADDRESS`, generated from the local installer flow and filtered to the pool account only. The shielded-pool runtime inlines Poseidon2; no external Poseidon contract is etched at activation.
 - `delivery_scheme1_vectors.json`
-  Normative delivery-scheme `1` vectors for the pinned X-Wing + AES-256-GCM receive path.
+  Normative delivery-scheme `1` vectors for the pinned ML-KEM-768 + AES-256-GCM receive path.
 - `outer_vk.bin`
   Raw Barretenberg verification-key bytes for the current `outer` circuit.
 - `outer_vk.sha256`

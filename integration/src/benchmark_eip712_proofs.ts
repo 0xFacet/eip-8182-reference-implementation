@@ -4,8 +4,8 @@ import os from "os";
 import { resolve } from "path";
 import { performance } from "perf_hooks";
 import * as secp from "@noble/secp256k1";
-import { keccak_256 } from "@noble/hashes/sha3";
-import { XWing } from "@noble/post-quantum/hybrid.js";
+import { shake256 } from "@noble/hashes/sha3";
+import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import {
   AUTH_POLICY_DOMAIN,
   AUTH_POLICY_KEY_DOMAIN,
@@ -157,8 +157,11 @@ function buildUserFixture(
   const pubKeyY = publicKey.slice(33, 65);
   const address = secp256k1PubkeyToAddress(pubKeyX, pubKeyY);
   const authDataCommitment = singleSigAuthDataCommitment(pubKeyX, pubKeyY, helpers.pHash);
-  const seed = keccak_256(new TextEncoder().encode(`xwing-delivery-${ds.toString()}`));
-  const { publicKey: deliveryPubKey } = XWing.keygen(seed);
+  const seed = shake256(
+    new TextEncoder().encode(`eip8182-delivery-${ds.toString()}`),
+    { dkLen: 64 },
+  );
+  const { publicKey: deliveryPubKey } = ml_kem768.keygen(seed);
 
   return {
     address,

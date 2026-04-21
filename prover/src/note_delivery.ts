@@ -1,8 +1,8 @@
 import { createDecipheriv } from 'crypto'
-import { keccak_256 } from '@noble/hashes/sha3'
+import { shake256 } from '@noble/hashes/sha3'
 import { extract, expand } from '@noble/hashes/hkdf'
 import { sha256 } from '@noble/hashes/sha256'
-import { XWing } from '@noble/post-quantum/hybrid.js'
+import { ml_kem768 } from '@noble/post-quantum/ml-kem.js'
 import {
   computeFullNoteCommitment,
   computeNoteNullifier,
@@ -65,11 +65,13 @@ export interface ShieldedPoolDepositHistoryEntry {
 const DELIVERY_KEY_LABEL = 'EIP-8182-delivery-scheme-1 key'
 const DELIVERY_NONCE_LABEL = 'EIP-8182-delivery-scheme-1 nonce'
 
-// Scheme 1A (transact) wire format: enc(1120) || ciphertext(160) || tag(16) = 1296 bytes.
-const SCHEME_1A_LENGTH = 1296
+// Scheme 1 enc prefix: raw ML-KEM-768 ciphertext.
+const SCHEME_1_ENC_LENGTH = 1088
+// Scheme 1A (transact) wire format: enc(1088) || ciphertext(160) || tag(16) = 1264 bytes.
+const SCHEME_1A_LENGTH = 1264
 const SCHEME_1A_PLAINTEXT = 160
-// Scheme 1B (deposit) wire format: enc(1120) || ciphertext(64) || tag(16) = 1200 bytes.
-const SCHEME_1B_LENGTH = 1200
+// Scheme 1B (deposit) wire format: enc(1088) || ciphertext(64) || tag(16) = 1168 bytes.
+const SCHEME_1B_LENGTH = 1168
 const SCHEME_1B_PLAINTEXT = 64
 
 function toHex(value: bigint): string {
@@ -116,23 +118,29 @@ function deriveKeyAndNonce(sharedSecret: Uint8Array): { key: Uint8Array; nonce: 
 }
 
 function deliverySeed(deliverySecret: bigint): Uint8Array {
-  return keccak_256(new TextEncoder().encode(`xwing-delivery-${deliverySecret.toString()}`))
+  return shake256(
+    new TextEncoder().encode(`eip8182-delivery-${deliverySecret.toString()}`),
+    { dkLen: 64 },
+  )
 }
 
 export function deriveDeliveryKeypair(deliverySecret: bigint) {
-  return XWing.keygen(deliverySeed(deliverySecret))
+  return ml_kem768.keygen(deliverySeed(deliverySecret))
 }
 
 function decryptCiphertext(
-  xwingSecretKey: Uint8Array,
+  secretKey: Uint8Array,
   encryptedData: Uint8Array,
   plaintextLength: number,
 ): Uint8Array | null {
   try {
-    const encapsulatedKey = encryptedData.slice(0, 1120)
-    const ciphertext = encryptedData.slice(1120, 1120 + plaintextLength)
-    const tag = encryptedData.slice(1120 + plaintextLength, 1120 + plaintextLength + 16)
-    const sharedSecret = XWing.decapsulate(encapsulatedKey, xwingSecretKey)
+    const encapsulatedKey = encryptedData.slice(0, SCHEME_1_ENC_LENGTH)
+    const ciphertext = encryptedData.slice(SCHEME_1_ENC_LENGTH, SCHEME_1_ENC_LENGTH + plaintextLength)
+    const tag = encryptedData.slice(
+      SCHEME_1_ENC_LENGTH + plaintextLength,
+      SCHEME_1_ENC_LENGTH + plaintextLength + 16,
+    )
+    const sharedSecret = ml_kem768.decapsulate(encapsulatedKey, secretKey)
     const { key, nonce } = deriveKeyAndNonce(sharedSecret)
     const decipher = createDecipheriv('aes-256-gcm', key, nonce)
     decipher.setAuthTag(tag)

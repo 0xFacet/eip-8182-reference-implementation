@@ -12,12 +12,12 @@ import {
   poseidon2HashPair,
 } from '../../integration/src/poseidon2.ts';
 import * as secp from '@noble/secp256k1';
-import { keccak_256 } from '@noble/hashes/sha3';
-import { XWing } from '@noble/post-quantum/hybrid.js';
+import { keccak_256, shake256 } from '@noble/hashes/sha3';
+import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { ethers } from 'ethers';
 import {
   AUTH_POLICY_KEY_DOMAIN,
-  DELIVERY_SCHEME_X_WING,
+  DELIVERY_SCHEME_ML_KEM_768,
   TRANSFER_OPERATION_KIND,
   bytesToHex,
   compactSignatureBytes,
@@ -28,7 +28,7 @@ import {
   PROTOCOL_REGISTRY_TREE_DEPTH,
   PROTOCOL_VERIFYING_CONTRACT,
   singleSigAuthDataCommitment,
-  X_WING_PUBLIC_KEY_LENGTH,
+  ML_KEM_768_PUBLIC_KEY_LENGTH,
 } from '../../src/lib/protocol.ts';
 import {
   assertAuthPolicyRoot,
@@ -272,7 +272,7 @@ async function syncFromChain() {
       continue;
     }
     const key = fromHexBytes(keyBytes.slice(2));
-    if (schemeId === DELIVERY_SCHEME_X_WING && key.length === X_WING_PUBLIC_KEY_LENGTH) {
+    if (schemeId === DELIVERY_SCHEME_ML_KEM_768 && key.length === ML_KEM_768_PUBLIC_KEY_LENGTH) {
       deliveryKeyCache.set(addr, key);
     } else {
       deliveryKeyCache.delete(addr);
@@ -353,7 +353,7 @@ async function readTreeSiblings(provider: ethers.providers.JsonRpcProvider, pool
 
 // ==================== Delivery Key Cache ====================
 
-const deliveryKeyCache = new Map<string, Uint8Array>(); // lowercase address → X-Wing pubkey
+const deliveryKeyCache = new Map<string, Uint8Array>(); // lowercase address → ML-KEM-768 pubkey
 
 async function getDeliveryPubKey(provider: ethers.providers.JsonRpcProvider, ownerAddress: bigint): Promise<Uint8Array | null> {
   const addrHex = '0x' + ownerAddress.toString(16).padStart(40, '0');
@@ -362,9 +362,9 @@ async function getDeliveryPubKey(provider: ethers.providers.JsonRpcProvider, own
   // Fallback: read from contract
   const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, provider);
   const [schemeId, keyBytes] = await pool.getDeliveryKey(addrHex);
-  if (!keyBytes || BigInt(schemeId.toString()) !== DELIVERY_SCHEME_X_WING) return null;
+  if (!keyBytes || BigInt(schemeId.toString()) !== DELIVERY_SCHEME_ML_KEM_768) return null;
   const key = fromHexBytes(keyBytes.slice(2));
-  if (key.length !== X_WING_PUBLIC_KEY_LENGTH) return null;
+  if (key.length !== ML_KEM_768_PUBLIC_KEY_LENGTH) return null;
   deliveryKeyCache.set(addrHex.toLowerCase(), key);
   return key;
 }
@@ -622,12 +622,15 @@ app.post('/derive-hashes', async (request) => {
     noteSecretSeed: string;
     deliverySecret: string;
   };
-  const xwingSeed = keccak_256(new TextEncoder().encode('xwing-delivery-' + deliverySecret));
-  const { publicKey: xwingPubKey } = XWing.keygen(xwingSeed);
+  const deliveryKeygenSeed = shake256(
+    new TextEncoder().encode('eip8182-delivery-' + deliverySecret),
+    { dkLen: 64 },
+  );
+  const { publicKey: deliveryPubKey } = ml_kem768.keygen(deliveryKeygenSeed);
   return {
     ownerNullifierKeyHash: hex(computeOwnerNullifierKeyHash(pHash, BigInt(ownerNullifierKey))),
     noteSecretSeedHash: hex(computeNoteSecretSeedHash(pHash, BigInt(noteSecretSeed))),
-    deliveryPubKey: '0x' + Array.from(xwingPubKey).map(b => b.toString(16).padStart(2, '0')).join(''),
+    deliveryPubKey: '0x' + Array.from(deliveryPubKey).map(b => b.toString(16).padStart(2, '0')).join(''),
   };
 });
 
@@ -636,7 +639,7 @@ app.get('/info', async () => {
   return {
     innerVkHash: hex(innerVkHash),
     innerCircuitPackage: BASELINE_INNER_PACKAGE,
-    deliverySchemeId: DELIVERY_SCHEME_X_WING.toString(),
+    deliverySchemeId: DELIVERY_SCHEME_ML_KEM_768.toString(),
     notes: 'baseline single-sig eip712 example',
   };
 });
@@ -767,13 +770,13 @@ app.post('/prove/transfer', async (request, reply) => {
       feeOwnerNullifierKeyHash: feeEntry?.ownerNullifierKeyHash,
       feeNoteSecretSeedHash: feeEntry?.noteSecretSeedHash,
       feeSiblings,
-      deliverySchemeId: senderDeliveryKey ? DELIVERY_SCHEME_X_WING.toString() : undefined,
+      deliverySchemeId: senderDeliveryKey ? DELIVERY_SCHEME_ML_KEM_768.toString() : undefined,
       deliveryPubKey: deliveryKeyHex(senderDeliveryKey),
-      recipientDeliverySchemeId: recipientDeliveryKey ? DELIVERY_SCHEME_X_WING.toString() : undefined,
+      recipientDeliverySchemeId: recipientDeliveryKey ? DELIVERY_SCHEME_ML_KEM_768.toString() : undefined,
       recipientDeliveryPubKey: deliveryKeyHex(recipientDeliveryKey),
-      changeDeliverySchemeId: senderDeliveryKey ? DELIVERY_SCHEME_X_WING.toString() : undefined,
+      changeDeliverySchemeId: senderDeliveryKey ? DELIVERY_SCHEME_ML_KEM_768.toString() : undefined,
       changeDeliveryPubKey: deliveryKeyHex(senderDeliveryKey),
-      feeDeliverySchemeId: feeDeliveryKey ? DELIVERY_SCHEME_X_WING.toString() : undefined,
+      feeDeliverySchemeId: feeDeliveryKey ? DELIVERY_SCHEME_ML_KEM_768.toString() : undefined,
       feeDeliveryPubKey: deliveryKeyHex(feeDeliveryKey ?? null),
       executionConstraints: params.executionConstraints,
     };
@@ -877,9 +880,9 @@ app.post('/prove/withdraw', async (request, reply) => {
       feeOwnerNullifierKeyHash: feeEntry?.ownerNullifierKeyHash,
       feeNoteSecretSeedHash: feeEntry?.noteSecretSeedHash,
       feeSiblings,
-      deliverySchemeId: senderDeliveryKey ? DELIVERY_SCHEME_X_WING.toString() : undefined,
+      deliverySchemeId: senderDeliveryKey ? DELIVERY_SCHEME_ML_KEM_768.toString() : undefined,
       deliveryPubKey: deliveryKeyHex(senderDeliveryKey),
-      feeDeliverySchemeId: feeDeliveryKey ? DELIVERY_SCHEME_X_WING.toString() : undefined,
+      feeDeliverySchemeId: feeDeliveryKey ? DELIVERY_SCHEME_ML_KEM_768.toString() : undefined,
       feeDeliveryPubKey: deliveryKeyHex(feeDeliveryKey ?? null),
       executionConstraints: params.executionConstraints,
     };

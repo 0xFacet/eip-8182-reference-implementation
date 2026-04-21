@@ -1,6 +1,6 @@
 import * as secp from "@noble/secp256k1";
-import { keccak_256 } from "@noble/hashes/sha3";
-import { XWing } from "@noble/post-quantum/hybrid.js";
+import { shake256 } from "@noble/hashes/sha3";
+import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import {
   computeSingleSigAuthorizationSigningHash,
   TRANSFER_OPERATION_KIND,
@@ -52,10 +52,11 @@ async function main() {
       helpers.pHash,
     );
 
-    const xwingSeed = keccak_256(
-      new TextEncoder().encode(`xwing-delivery-${deliverySecret.toString()}`),
+    const deliveryKeygenSeed = shake256(
+      new TextEncoder().encode(`eip8182-delivery-${deliverySecret.toString()}`),
+      { dkLen: 64 },
     );
-    const { publicKey: deliveryPubKey } = XWing.keygen(xwingSeed);
+    const { publicKey: deliveryPubKey } = ml_kem768.keygen(deliveryKeygenSeed);
 
     const authorizingAddress = secp256k1PubkeyToAddress(pubKeyX, pubKeyY);
     const semanticIntent = {
