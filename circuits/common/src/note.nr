@@ -1,7 +1,5 @@
 use crate::constants::{
     DUMMY_OWNER_NULLIFIER_KEY_PREIMAGE,
-    ORIGIN_MODE_DEFAULT,
-    ORIGIN_MODE_REQUIRE_TAGGED,
     NULLIFIER_DOMAIN,
     TRANSACT_NOTE_SECRET_DOMAIN,
     NOTE_SECRET_SEED_DOMAIN,
@@ -11,7 +9,7 @@ use crate::constants::{
     OWNER_NULLIFIER_KEY_HASH_DOMAIN,
     PHANTOM_NULLIFIER_DOMAIN,
 };
-use crate::hash_utils::{p_hash2, p_hash3, p_hash4, p_hash5};
+use crate::hash_utils::{p_hash2, p_hash3, p_hash4};
 use crate::types::Note;
 
 // Owner-side note commitment (EIP Section 7.3). Hides owner-identifying fields behind a
@@ -25,14 +23,12 @@ pub fn note_body_commitment(
     owner_commitment_value: Field,
     amount: Field,
     token_address: Field,
-    origin_tag: Field,
 ) -> Field {
-    p_hash5([
+    p_hash4([
         NOTE_BODY_COMMITMENT_DOMAIN,
         owner_commitment_value,
         amount,
         token_address,
-        origin_tag,
     ])
 }
 
@@ -47,7 +43,7 @@ pub fn note_commitment(note_body_commitment_value: Field, leaf_index: Field) -> 
 // and needs the final commitment to derive the nullifier.
 pub fn full_note_commitment(note: Note, leaf_index: Field) -> Field {
     let oc = owner_commitment(note.owner_nullifier_key_hash, note.note_secret);
-    let body = note_body_commitment(oc, note.amount, note.token_address, note.origin_tag);
+    let body = note_body_commitment(oc, note.amount, note.token_address);
     note_commitment(body, leaf_index)
 }
 
@@ -81,102 +77,6 @@ pub fn note_secret(note_secret_seed: Field, intent_replay_id: Field, output_inde
     p_hash4([TRANSACT_NOTE_SECRET_DOMAIN, note_secret_seed, intent_replay_id, output_index])
 }
 
-pub fn origin_tag_for_spend(
-    input0_is_phantom: bool,
-    input0_origin_tag: Field,
-    input1_is_phantom: bool,
-    input1_origin_tag: Field,
-) -> Field {
-    if input0_is_phantom {
-        input1_origin_tag
-    } else if input1_is_phantom {
-        input0_origin_tag
-    } else if input0_origin_tag == input1_origin_tag {
-        input0_origin_tag
-    } else {
-        0
-    }
-}
-
-pub fn origin_mode_satisfied(
-    origin_mode: Field,
-    input0_is_phantom: bool,
-    input0_origin_tag: Field,
-    input1_is_phantom: bool,
-    input1_origin_tag: Field,
-    out0_is_dummy: bool,
-    out0_origin_tag: Field,
-    out1_is_dummy: bool,
-    out1_origin_tag: Field,
-    out2_is_dummy: bool,
-    out2_origin_tag: Field,
-) -> bool {
-    if origin_mode == ORIGIN_MODE_DEFAULT {
-        true
-    } else if origin_mode == ORIGIN_MODE_REQUIRE_TAGGED {
-        let inputs_ok = if input0_is_phantom {
-            input1_origin_tag != 0
-        } else if input1_is_phantom {
-            input0_origin_tag != 0
-        } else {
-            if input0_origin_tag == input1_origin_tag {
-                input0_origin_tag != 0
-            } else {
-                false
-            }
-        };
-        let out0_ok = if out0_is_dummy { true } else { out0_origin_tag != 0 };
-        let out1_ok = if out1_is_dummy { true } else { out1_origin_tag != 0 };
-        let out2_ok = if out2_is_dummy { true } else { out2_origin_tag != 0 };
-        if inputs_ok {
-            if out0_ok {
-                if out1_ok {
-                    out2_ok
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    } else {
-        false
-    }
-}
-
-pub fn assert_origin_mode_constraints(
-    origin_mode: Field,
-    input0_is_phantom: bool,
-    input0_origin_tag: Field,
-    input1_is_phantom: bool,
-    input1_origin_tag: Field,
-    out0_is_dummy: bool,
-    out0_origin_tag: Field,
-    out1_is_dummy: bool,
-    out1_origin_tag: Field,
-    out2_is_dummy: bool,
-    out2_origin_tag: Field,
-) {
-    assert(
-        origin_mode_satisfied(
-            origin_mode,
-            input0_is_phantom,
-            input0_origin_tag,
-            input1_is_phantom,
-            input1_origin_tag,
-            out0_is_dummy,
-            out0_origin_tag,
-            out1_is_dummy,
-            out1_origin_tag,
-            out2_is_dummy,
-            out2_origin_tag,
-        ),
-        "invalid origin mode",
-    );
-}
-
 #[test]
 fn test_full_note_commitment_deterministic() {
     let note = Note {
@@ -184,7 +84,6 @@ fn test_full_note_commitment_deterministic() {
         note_secret: note_secret(0xbeef, 0xaaaa, 0),
         owner_nullifier_key_hash: owner_nullifier_key_hash(0x9999),
         token_address: 0x1111,
-        origin_tag: 0x5555,
     };
     let c1 = full_note_commitment(note, 7);
     let c2 = full_note_commitment(note, 7);
@@ -247,97 +146,4 @@ fn test_note_secret_deterministic() {
     assert(r1 == r2);
     let r3 = note_secret(0xbeef, 0xaaaa, 1);
     assert(r3 != r1);
-}
-
-#[test]
-fn test_origin_tag_for_spend_clears_on_mismatch() {
-    let eff = origin_tag_for_spend(false, 0x5555, false, 0x6666);
-    assert(eff == 0);
-}
-
-#[test]
-fn test_origin_tag_for_spend_phantom_inherits() {
-    let eff = origin_tag_for_spend(true, 0, false, 0x5555);
-    assert(eff == 0x5555);
-    let eff2 = origin_tag_for_spend(false, 0x5555, true, 0);
-    assert(eff2 == 0x5555);
-}
-
-#[test]
-fn test_origin_tag_for_spend_same_tag_preserved() {
-    let eff = origin_tag_for_spend(false, 0x5555, false, 0x5555);
-    assert(eff == 0x5555);
-}
-
-#[test]
-fn test_origin_mode_default_allows_cleared_outputs() {
-    assert(origin_mode_satisfied(
-        ORIGIN_MODE_DEFAULT,
-        false,
-        0x5555,
-        false,
-        0x6666,
-        false,
-        0,
-        true,
-        0,
-        true,
-        0,
-    ));
-}
-
-#[test]
-fn test_origin_mode_require_tagged_rejects_mixed_real_inputs() {
-    assert(!origin_mode_satisfied(
-        ORIGIN_MODE_REQUIRE_TAGGED,
-        false,
-        0x5555,
-        false,
-        0x6666,
-        false,
-        0,
-        true,
-        0,
-        true,
-        0,
-    ));
-}
-
-#[test]
-fn test_origin_mode_require_tagged_accepts_shared_nonzero_inputs() {
-    assert(origin_mode_satisfied(
-        ORIGIN_MODE_REQUIRE_TAGGED,
-        false,
-        0x5555,
-        false,
-        0x5555,
-        false,
-        0x5555,
-        true,
-        0,
-        true,
-        0,
-    ));
-}
-
-#[test]
-fn test_origin_mode_require_tagged_rejects_zero_output_tag() {
-    assert(!origin_mode_satisfied(
-        ORIGIN_MODE_REQUIRE_TAGGED,
-        true,
-        0,
-        true,
-        0,
-        false,
-        0,
-        true,
-        0,
-        true,
-        0,
-    ));
-}
-
-#[test]
-fn test_origin_mode_rejects_invalid_kind() {
-    assert(!origin_mode_satisfied(2, true, 0, true, 0, true, 0, true, 0, true, 0));
 }

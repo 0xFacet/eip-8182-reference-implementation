@@ -22,9 +22,6 @@ contract ShieldedPool {
 
     address internal constant PROOF_VERIFY_PRECOMPILE_ADDRESS = 0x0000000000000000000000000000000000000030;
 
-    uint8 internal constant ORIGIN_MODE_DEFAULT = 0;
-    uint8 internal constant ORIGIN_MODE_REQUIRE_TAGGED = 1;
-
     /// 17 public inputs per EIP-8182 Section 10.
     struct PublicInputs {
         uint256 noteCommitmentRoot;
@@ -89,8 +86,6 @@ contract ShieldedPool {
     error IntentLifetimeTooLong();
     error IntentReplayIdAlreadyUsed();
     error InvalidDepositAmount();
-    error InvalidOriginMode();
-    error InvalidOriginTag();
     error InvalidOutputNoteDataHash(uint8 slot);
     error InvalidOwnerCommitment();
     error InvalidPublicActionConfiguration();
@@ -130,7 +125,6 @@ contract ShieldedPool {
         uint256 leafIndex,
         uint256 amount,
         uint256 tokenAddress,
-        uint256 originTag,
         uint256 postInsertionCommitmentRoot,
         bytes outputNoteData
     );
@@ -299,17 +293,12 @@ contract ShieldedPool {
     function deposit(
         address token,
         uint256 amount,
-        uint8 originMode,
         uint256 ownerCommitment,
         bytes calldata outputNoteData
     ) external payable nonReentrant {
         require(amount > 0 && amount <= MAX_AMOUNT_VALUE, InvalidDepositAmount());
         require(ownerCommitment != 0, InvalidOwnerCommitment());
         _ensureCanonicalField(ownerCommitment);
-        require(
-            originMode == ORIGIN_MODE_DEFAULT || originMode == ORIGIN_MODE_REQUIRE_TAGGED,
-            InvalidOriginMode()
-        );
 
         if (token == address(0)) {
             require(msg.value == amount, EthAmountMismatch());
@@ -324,9 +313,8 @@ contract ShieldedPool {
         uint256 leafIndex = nextLeafIndex;
         require(leafIndex <= MAX_NOTE_COMMITMENT_LEAF_INDEX, TreeFull());
 
-        uint256 originTag = _computeDepositOriginTag(originMode, token, amount, leafIndex);
         uint256 finalNoteCommitment =
-            _sealDepositNoteCommitment(ownerCommitment, amount, uint256(uint160(token)), originTag, leafIndex);
+            _sealDepositNoteCommitment(ownerCommitment, amount, uint256(uint160(token)), leafIndex);
 
         _pushNoteCommitmentRoot(_currentNoteCommitmentRoot());
         _insertNoteCommitment(finalNoteCommitment);
@@ -337,7 +325,6 @@ contract ShieldedPool {
             leafIndex,
             amount,
             uint256(uint160(token)),
-            originTag,
             currentNoteCommitmentRoot,
             outputNoteData
         );
@@ -347,31 +334,12 @@ contract ShieldedPool {
         uint256 ownerCommitment,
         uint256 amount,
         uint256 tokenAsUint,
-        uint256 originTag,
         uint256 leafIndex
     ) private pure returns (uint256) {
-        uint256 body = PoseidonFieldLib.noteBodyCommitment(ownerCommitment, amount, tokenAsUint, originTag);
+        uint256 body = PoseidonFieldLib.noteBodyCommitment(ownerCommitment, amount, tokenAsUint);
         uint256 finalCommitment = PoseidonFieldLib.noteCommitment(body, leafIndex);
         require(finalCommitment != 0, ZeroNoteCommitment());
         return finalCommitment;
-    }
-
-    function _computeDepositOriginTag(uint8 originMode, address token, uint256 amount, uint256 leafIndex)
-        private
-        view
-        returns (uint256)
-    {
-        if (originMode == ORIGIN_MODE_DEFAULT) return 0;
-
-        uint256 originTag = PoseidonFieldLib.depositOriginTag(
-            block.chainid,
-            uint256(uint160(msg.sender)),
-            uint256(uint160(token)),
-            amount,
-            leafIndex
-        );
-        require(originTag != 0, InvalidOriginTag());
-        return originTag;
     }
 
     function getCurrentRoots()

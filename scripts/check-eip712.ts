@@ -11,9 +11,9 @@ import {
 } from '../src/lib/protocol.ts'
 
 const EXPECTED_INTENT_TYPE =
-  'ShieldedPoolIntent(address authorizingAddress,uint256 policyVersion,uint256 authDomainTag,uint8 operationKind,address tokenAddress,address recipientAddress,uint256 amount,address feeRecipientAddress,uint256 feeAmount,uint8 originMode,uint256 nonce,uint32 validUntilSeconds,uint32 executionConstraintsFlags,uint256 lockedOutputBinding0,uint256 lockedOutputBinding1,uint256 lockedOutputBinding2)'
+  'ShieldedPoolIntent(address authorizingAddress,uint256 policyVersion,uint256 authDomainTag,uint8 operationKind,address tokenAddress,address recipientAddress,uint256 amount,address feeRecipientAddress,uint256 feeAmount,uint256 nonce,uint32 validUntilSeconds,uint32 executionConstraintsFlags,uint256 lockedOutputBinding0,uint256 lockedOutputBinding1,uint256 lockedOutputBinding2)'
 const EXPECTED_INTENT_TYPE_HASH =
-  '0x79feac899af7279741df556d4c1f43267870af5c8c0633dec1f7e3681df5a6b3'
+  '0xf05605fc7fdcf2f5c7eee0a061dc32b03baa163e136bc873c4244e8538fab4e9'
 
 const sampleIntent = {
   authorizingAddress: 0x7e5f4552091a69125d5dfcb7b8c2659029395bdfn,
@@ -25,7 +25,6 @@ const sampleIntent = {
   amount: 1000n,
   feeRecipientAddress: 0x3000000000000000000000000000000000000003n,
   feeAmount: 7n,
-  originMode: 1n,
   nonce: 42n,
   validUntilSeconds: 3600n,
   executionConstraints: {

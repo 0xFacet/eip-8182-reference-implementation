@@ -7,8 +7,6 @@ library PoseidonFieldLib {
     uint256 internal constant FIELD_MODULUS =
         21888242871839275222246405745257275088548364400416034343698204186575808495617;
 
-    uint256 internal constant ORIGIN_TAG_DOMAIN =
-        uint256(keccak256("eip-8182.origin_tag")) % FIELD_MODULUS;
     uint256 internal constant OWNER_NULLIFIER_KEY_HASH_DOMAIN =
         uint256(keccak256("eip-8182.owner_nullifier_key_hash")) % FIELD_MODULUS;
     uint256 internal constant OUTPUT_BINDING_DOMAIN =
@@ -44,15 +42,13 @@ library PoseidonFieldLib {
     function noteBodyCommitment(
         uint256 ownerCommitmentValue,
         uint256 amount,
-        uint256 tokenAddress,
-        uint256 originTag
+        uint256 tokenAddress
     ) internal pure returns (uint256) {
-        return Poseidon2Sponge.hash5(
+        return Poseidon2Sponge.hash4(
             NOTE_BODY_COMMITMENT_DOMAIN,
             ownerCommitmentValue,
             amount,
-            tokenAddress,
-            originTag
+            tokenAddress
         );
     }
 
@@ -63,17 +59,6 @@ library PoseidonFieldLib {
 
     function outputBinding(uint256 noteCommitmentValue, uint256 outputNoteDataHash) internal pure returns (uint256) {
         return Poseidon2Sponge.hash3(OUTPUT_BINDING_DOMAIN, noteCommitmentValue, outputNoteDataHash);
-    }
-
-    /// Deposit origin tag per EIP Section 12.1.
-    function depositOriginTag(
-        uint256 chainId,
-        uint256 sender,
-        uint256 tokenAddress,
-        uint256 amount,
-        uint256 leafIndex
-    ) internal pure returns (uint256) {
-        return Poseidon2Sponge.hash6(ORIGIN_TAG_DOMAIN, chainId, sender, tokenAddress, amount, leafIndex);
     }
 
     function noteSecretSeedHash(uint256 noteSecretSeed) internal pure returns (uint256) {

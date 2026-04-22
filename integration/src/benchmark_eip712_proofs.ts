@@ -248,7 +248,6 @@ function buildCases(
     noteSecret: DEPOSIT_NOTE_SECRET,
     amount: DEPOSIT_AMOUNT,
     tokenAddress: 0n,
-    originTag: 0n,
     leafIndex: depositLeafIndex,
   });
   const postDepositCommitments = merkleRootAndSiblings(
@@ -276,7 +275,6 @@ function buildCases(
     inputLeafIndex: depositLeafIndex.toString(),
     inputAmount: DEPOSIT_AMOUNT.toString(),
     inputNoteSecret: hex(DEPOSIT_NOTE_SECRET),
-    inputOriginTag: "0",
     inputSiblings: postDepositCommitments.siblings,
     userSiblings: aliceBobRegistryForAlice.siblings,
     recipientSiblings: aliceBobRegistryForBob.siblings,
@@ -309,7 +307,6 @@ function buildCases(
     inputLeafIndex: depositLeafIndex.toString(),
     inputAmount: DEPOSIT_AMOUNT.toString(),
     inputNoteSecret: hex(DEPOSIT_NOTE_SECRET),
-    inputOriginTag: "0",
     inputSiblings: postDepositCommitments.siblings,
     userSiblings: aliceRegistry.siblings,
     authSiblings: aliceAuth.siblings,
@@ -357,7 +354,6 @@ async function proveEip712(
     amount: common.amount,
     feeRecipientAddress: common.feeRecipientAddress,
     feeAmount: common.feeAmount,
-    originMode: common.originMode,
     nonce: common.nonce,
     validUntilSeconds: common.validUntilSeconds,
     executionChainId: common.executionChainId,

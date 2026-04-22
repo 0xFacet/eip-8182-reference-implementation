@@ -18,7 +18,6 @@ use privacy_pool_common::range::{
     assert_address,
     assert_amount,
     assert_execution_constraints_flags,
-    assert_origin_mode,
     assert_valid_until,
 };
 
@@ -44,10 +43,10 @@ global VERSION_HASH: [u8; 32] = [
 ];
 
 global EIP712_TYPE_HASH: [u8; 32] = [
-    0x79, 0xfe, 0xac, 0x89, 0x9a, 0xf7, 0x27, 0x97,
-    0x41, 0xdf, 0x55, 0x6d, 0x4c, 0x1f, 0x43, 0x26,
-    0x78, 0x70, 0xaf, 0x5c, 0x8c, 0x06, 0x33, 0xde,
-    0xc1, 0xf7, 0xe3, 0x68, 0x1d, 0xf5, 0xa6, 0xb3,
+    0xf0, 0x56, 0x05, 0xfc, 0x7f, 0xdc, 0xf2, 0xf5,
+    0xc7, 0xee, 0xe0, 0xa0, 0x61, 0xdc, 0x32, 0xb0,
+    0x3b, 0xaa, 0x16, 0x3e, 0x13, 0x6b, 0xc8, 0x73,
+    0xc4, 0x24, 0x4e, 0x85, 0x38, 0xfa, 0xb4, 0xe9,
 ];
 
 pub struct Authorization {
@@ -91,7 +90,6 @@ pub struct Intent {
     pub amount: Field,
     pub fee_recipient_address: Field,
     pub fee_amount: Field,
-    pub origin_mode: Field,
     pub execution_constraints: ExecutionConstraints,
     pub nonce: Field,
     pub valid_until_seconds: Field,
@@ -107,7 +105,6 @@ pub struct ValidatedIntent {
     pub amount: Field,
     pub fee_recipient_address: Field,
     pub fee_amount: Field,
-    pub origin_mode: Field,
     pub execution_constraints: ValidatedExecutionConstraints,
     pub nonce: Field,
     pub valid_until_seconds: Field,
@@ -123,7 +120,6 @@ impl Intent {
         assert_amount(self.amount);
         assert_address(self.fee_recipient_address);
         assert_amount(self.fee_amount);
-        assert_origin_mode(self.origin_mode);
         assert_valid_until(self.valid_until_seconds);
         let execution_constraints = self.execution_constraints.assert_valid();
         ValidatedIntent {
@@ -135,7 +131,6 @@ impl Intent {
             amount: self.amount,
             fee_recipient_address: self.fee_recipient_address,
             fee_amount: self.fee_amount,
-            origin_mode: self.origin_mode,
             execution_constraints,
             nonce: self.nonce,
             valid_until_seconds: self.valid_until_seconds,
@@ -194,7 +189,7 @@ impl ValidatedIntent {
         let execution_constraints = intent.execution_constraints;
         assert_address(context.verifying_contract);
 
-        let mut struct_preimage: [u8; 544] = [0; 544];
+        let mut struct_preimage: [u8; 512] = [0; 512];
         write_bytes32(EIP712_TYPE_HASH, &mut struct_preimage, 0);
         write_field_as_u256(intent.authorizing_address, &mut struct_preimage, 32);
         write_field_as_u256(intent.policy_version, &mut struct_preimage, 64);
@@ -205,30 +200,29 @@ impl ValidatedIntent {
         write_field_as_u256(intent.amount, &mut struct_preimage, 224);
         write_field_as_u256(intent.fee_recipient_address, &mut struct_preimage, 256);
         write_field_as_u256(intent.fee_amount, &mut struct_preimage, 288);
-        write_field_as_u256(intent.origin_mode, &mut struct_preimage, 320);
-        write_field_as_u256(intent.nonce, &mut struct_preimage, 352);
-        write_field_as_u256(intent.valid_until_seconds, &mut struct_preimage, 384);
+        write_field_as_u256(intent.nonce, &mut struct_preimage, 320);
+        write_field_as_u256(intent.valid_until_seconds, &mut struct_preimage, 352);
         write_field_as_u256(
             execution_constraints.execution_constraints_flags,
             &mut struct_preimage,
-            416,
+            384,
         );
         write_field_as_u256(
             execution_constraints.locked_output_binding0,
             &mut struct_preimage,
-            448,
+            416,
         );
         write_field_as_u256(
             execution_constraints.locked_output_binding1,
             &mut struct_preimage,
-            480,
+            448,
         );
         write_field_as_u256(
             execution_constraints.locked_output_binding2,
             &mut struct_preimage,
-            512,
+            480,
         );
-        let struct_hash = keccak256(struct_preimage, 544);
+        let struct_hash = keccak256(struct_preimage, 512);
 
         let mut domain_preimage: [u8; 160] = [0; 160];
         write_bytes32(DOMAIN_TYPE_HASH, &mut domain_preimage, 0);
@@ -260,7 +254,6 @@ impl ValidatedIntent {
             intent.amount,
             intent.fee_recipient_address,
             intent.fee_amount,
-            intent.origin_mode,
             execution_constraints.execution_constraints_flags,
             execution_constraints.locked_output_binding0,
             execution_constraints.locked_output_binding1,
@@ -359,7 +352,7 @@ fn is_flag_set(constraint_flags: Field, bit: Field) -> bool {
     }
 }
 
-fn sample_validated_intent(origin_mode: Field) -> ValidatedIntent {
+fn sample_validated_intent() -> ValidatedIntent {
     Intent {
         authorizing_address: 0x7e5f4552091a69125d5dfcb7b8c2659029395bdf,
         policy_version: 1,
@@ -369,7 +362,6 @@ fn sample_validated_intent(origin_mode: Field) -> ValidatedIntent {
         amount: 1000,
         fee_recipient_address: 0,
         fee_amount: 0,
-        origin_mode: origin_mode,
         execution_constraints: ExecutionConstraints {
             execution_constraints_flags: 0,
             locked_output_binding0: 0,
@@ -383,40 +375,15 @@ fn sample_validated_intent(origin_mode: Field) -> ValidatedIntent {
 }
 
 #[test]
-fn test_transaction_intent_digest_changes_with_origin_mode() {
-    let digest0 = sample_validated_intent(0).transaction_intent_digest();
-    let digest1 = sample_validated_intent(1).transaction_intent_digest();
-    assert(digest0 != digest1);
-}
-
-#[test]
-fn test_eip712_signing_hash_changes_with_origin_mode() {
-    let hash0 = sample_validated_intent(0).eip712_signing_hash(
-        eip712_context(0x73696e676c655f61757468, default_eip712_verifying_contract()),
-    );
-    let hash1 = sample_validated_intent(1).eip712_signing_hash(
-        eip712_context(0x73696e676c655f61757468, default_eip712_verifying_contract()),
-    );
-
-    let mut differs = false;
-    for i in 0..32 {
-        if hash0[i] != hash1[i] {
-            differs = true;
-        }
-    }
-    assert(differs);
-}
-
-#[test]
 fn test_eip712_signing_hash_matches_expected_sample() {
-    let actual = sample_validated_intent(0).eip712_signing_hash(
+    let actual = sample_validated_intent().eip712_signing_hash(
         eip712_context(0x73696e676c655f61757468, default_eip712_verifying_contract()),
     );
     let expected: [u8; 32] = [
-        0x11, 0xa4, 0x08, 0xe6, 0x73, 0x2d, 0xf6, 0xe2,
-        0x8d, 0xed, 0x79, 0x9c, 0x5c, 0xb8, 0xd8, 0x5f,
-        0x8e, 0xd7, 0xbc, 0x90, 0x10, 0xbb, 0x5d, 0xa7,
-        0x38, 0xed, 0xaa, 0x0b, 0x64, 0xf9, 0x10, 0xa5,
+        0x85, 0xd1, 0x50, 0x80, 0xbc, 0x03, 0x95, 0xfd,
+        0x6e, 0x39, 0x8e, 0x52, 0x26, 0x89, 0xe1, 0x24,
+        0x89, 0x60, 0xd4, 0x41, 0x19, 0x8a, 0x0f, 0x6c,
+        0x2f, 0x85, 0x54, 0x2a, 0xcd, 0x82, 0x12, 0xec,
     ];
 
     for i in 0..32 {
@@ -426,7 +393,7 @@ fn test_eip712_signing_hash_matches_expected_sample() {
 
 #[test]
 fn test_transaction_intent_digest_changes_with_execution_constraints() {
-    let digest0 = sample_validated_intent(0).transaction_intent_digest();
+    let digest0 = sample_validated_intent().transaction_intent_digest();
     let digest1 = Intent {
         authorizing_address: 0x7e5f4552091a69125d5dfcb7b8c2659029395bdf,
         policy_version: 1,
@@ -436,7 +403,6 @@ fn test_transaction_intent_digest_changes_with_execution_constraints() {
         amount: 1000,
         fee_recipient_address: 0,
         fee_amount: 0,
-        origin_mode: 0,
         execution_constraints: ExecutionConstraints {
             execution_constraints_flags: LOCK_OUTPUT_BINDING_0,
             locked_output_binding0: 0x1234,

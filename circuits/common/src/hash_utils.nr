@@ -30,12 +30,8 @@ pub fn p_hash5(input: [Field; 5]) -> Field {
     Poseidon2::hash(input, 5)
 }
 
-pub fn p_hash6(input: [Field; 6]) -> Field {
-    Poseidon2::hash(input, 6)
-}
-
-pub fn p_hash17(input: [Field; 17]) -> Field {
-    Poseidon2::hash(input, 17)
+pub fn p_hash16(input: [Field; 16]) -> Field {
+    Poseidon2::hash(input, 16)
 }
 
 // --------------------------------------------------------------------------

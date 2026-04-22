@@ -2,7 +2,6 @@ use keccak256::keccak256;
 use privacy_pool_common::range::{
     assert_address,
     assert_amount,
-    assert_origin_mode,
     assert_valid_until,
 };
 use inner::{
@@ -37,10 +36,10 @@ global VERSION_HASH: [u8; 32] = [
 ];
 
 global AUTHORIZATION_TYPE_HASH: [u8; 32] = [
-    0x88, 0x2e, 0x42, 0xc5, 0x7a, 0x90, 0xf3, 0x18,
-    0xa4, 0xd4, 0xa2, 0x98, 0x63, 0x92, 0x8e, 0x9f,
-    0xad, 0x7a, 0x83, 0x6b, 0xaf, 0xaf, 0xe5, 0x78,
-    0xd8, 0x31, 0xcd, 0x68, 0x99, 0x88, 0xc3, 0xc8,
+    0xda, 0x45, 0x3f, 0x7b, 0x71, 0x48, 0x4c, 0x64,
+    0xd8, 0x7f, 0x0d, 0x8b, 0xa6, 0x06, 0xf9, 0xd8,
+    0x14, 0xfe, 0x5b, 0x30, 0xbc, 0x54, 0x49, 0xaf,
+    0xcb, 0x28, 0xa0, 0x4f, 0x05, 0x29, 0xfe, 0x19,
 ];
 
 global FIELD_MODULUS_BYTES: [u8; 32] = [
@@ -60,7 +59,6 @@ struct SingleSigAuthorization {
     amount: Field,
     fee_recipient_address: Field,
     fee_amount: Field,
-    origin_mode: Field,
     nonce: [u8; 32],
     valid_until_seconds: Field,
 }
@@ -98,7 +96,6 @@ impl SingleSigAuthorization {
         assert_amount(self.amount);
         assert_address(self.fee_recipient_address);
         assert_amount(self.fee_amount);
-        assert_origin_mode(self.origin_mode);
         assert_valid_until(self.valid_until_seconds);
         assert_address(authorizing_address);
 
@@ -120,7 +117,6 @@ impl SingleSigAuthorization {
             amount: self.amount,
             fee_recipient_address: self.fee_recipient_address,
             fee_amount: self.fee_amount,
-            origin_mode: self.origin_mode,
             execution_constraints,
             nonce,
             valid_until_seconds: self.valid_until_seconds,
@@ -134,7 +130,7 @@ fn authorization_signing_hash(
     execution_chain_id: Field,
     pool_address: Field,
 ) -> [u8; 32] {
-    let mut struct_preimage: [u8; 352] = [0; 352];
+    let mut struct_preimage: [u8; 320] = [0; 320];
     write_bytes32(AUTHORIZATION_TYPE_HASH, &mut struct_preimage, 0);
     write_field_as_u256(authorization.policy_version, &mut struct_preimage, 32);
     write_field_as_u256(authorization.operation_kind, &mut struct_preimage, 64);
@@ -143,10 +139,9 @@ fn authorization_signing_hash(
     write_field_as_u256(authorization.amount, &mut struct_preimage, 160);
     write_field_as_u256(authorization.fee_recipient_address, &mut struct_preimage, 192);
     write_field_as_u256(authorization.fee_amount, &mut struct_preimage, 224);
-    write_field_as_u256(authorization.origin_mode, &mut struct_preimage, 256);
-    write_bytes32(authorization.nonce, &mut struct_preimage, 288);
-    write_field_as_u256(authorization.valid_until_seconds, &mut struct_preimage, 320);
-    let struct_hash = keccak256(struct_preimage, 352);
+    write_bytes32(authorization.nonce, &mut struct_preimage, 256);
+    write_field_as_u256(authorization.valid_until_seconds, &mut struct_preimage, 288);
+    let struct_hash = keccak256(struct_preimage, 320);
 
     let mut domain_preimage: [u8; 160] = [0; 160];
     write_bytes32(DOMAIN_TYPE_HASH, &mut domain_preimage, 0);

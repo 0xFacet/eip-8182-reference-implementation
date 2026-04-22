@@ -81,7 +81,6 @@ async function main() {
     noteSecret: depositNoteSecret,
     amount: FIXTURE_DEPOSIT_AMOUNT,
     tokenAddress: 0n,
-    originTag: 0n,
     leafIndex: depositLeafIndex,
   });
 
@@ -132,7 +131,6 @@ async function main() {
     inputLeafIndex: depositLeafIndex.toString(),
     inputAmount: FIXTURE_DEPOSIT_AMOUNT.toString(),
     inputNoteSecret: depositNoteSecret.toString(),
-    inputOriginTag: "0",
     inputSiblings: commitmentSiblings.map((value) => "0x" + value.toString(16)),
     userSiblings: userSiblings.map((value) => "0x" + value.toString(16)),
     recipientSiblings: userSiblings.map((value) => "0x" + value.toString(16)),
@@ -156,7 +154,6 @@ async function main() {
     amount: initialCommon.amount,
     feeRecipientAddress: initialCommon.feeRecipientAddress,
     feeAmount: initialCommon.feeAmount,
-    originMode: initialCommon.originMode,
     nonce: initialCommon.nonce,
     validUntilSeconds: initialCommon.validUntilSeconds,
     executionChainId: initialCommon.executionChainId,

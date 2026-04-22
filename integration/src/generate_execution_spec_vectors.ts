@@ -12,14 +12,12 @@ import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import {
   DELIVERY_SCHEME_ML_KEM_768,
   FIELD_MODULUS,
-  ORIGIN_TAG_DOMAIN,
   bytesToHex,
   hexToBytes,
 } from "../../src/lib/protocol.ts";
 import { createPoseidonHelpers } from "./tx_proof_shared.ts";
 import { initPoseidon2, poseidon2Hash } from "./poseidon2.ts";
 import {
-  computeDepositOriginTag,
   computeFullNoteCommitment,
   computeOwnerNullifierKeyHash,
 } from "./eip8182.ts";
@@ -30,14 +28,13 @@ interface VerifierFixture {
   outputNoteData: [string, string, string];
 }
 
-// Scheme 1A plaintext fields (EIP Section 15.2). ownerAddress is NOT part of
+// Scheme 1A plaintext fields (EIP Section 14.2). ownerAddress is NOT part of
 // the plaintext — the recipient derives it from on-chain coordination.
 interface NoteFields {
   amount: bigint;
   noteSecret: bigint;
   ownerNullifierKeyHash: bigint;
   tokenAddress: bigint;
-  originTag: bigint;
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -331,7 +328,6 @@ function buildScheme1ATransactVector(
     noteSecret: 0x123456789abcdef123456789abcdef123456789abcdef123456789abcdefn,
     ownerNullifierKeyHash: computeOwnerNullifierKeyHash(helpers.pHash, 0x7777n),
     tokenAddress: 0x00000000000000000000000000000000000000bbn,
-    originTag: helpers.pHash([ORIGIN_TAG_DOMAIN, 31337n, 1n]),
   };
   const leafIndex = 7n;
   const plaintext = encodeScheme1ANote(note);
@@ -340,12 +336,11 @@ function buildScheme1ATransactVector(
     noteSecret: note.noteSecret,
     amount: note.amount,
     tokenAddress: note.tokenAddress,
-    originTag: note.originTag,
     leafIndex,
   });
 
-  // Scheme 1A wire format: enc(1088) || ciphertext(160) || tag(16) = 1264 bytes.
-  const sealed = sealDeliveryPayload(plaintext, 1264);
+  // Scheme 1A wire format: enc(1088) || ciphertext(128) || tag(16) = 1232 bytes.
+  const sealed = sealDeliveryPayload(plaintext, 1232);
   const recoveredPlaintext = openDeliveryPayload(sealed, plaintext.length);
   const recoveredNote = decodeScheme1ANote(recoveredPlaintext);
   const recoveredCommitment = computeFullNoteCommitment(helpers.pHash, {
@@ -353,7 +348,6 @@ function buildScheme1ATransactVector(
     noteSecret: recoveredNote.noteSecret,
     amount: recoveredNote.amount,
     tokenAddress: recoveredNote.tokenAddress,
-    originTag: recoveredNote.originTag,
     leafIndex,
   });
   if (recoveredCommitment !== noteCommitment) {
@@ -361,8 +355,8 @@ function buildScheme1ATransactVector(
   }
 
   return {
-    plaintextLengthBytes: 160,
-    ciphertextLengthBytes: 1264,
+    plaintextLengthBytes: 128,
+    ciphertextLengthBytes: 1232,
     vectors: [
       {
         aeadKey: bytesToHex(sealed.key),
@@ -390,21 +384,11 @@ function buildScheme1ATransactVector(
 function buildScheme1BDepositVector(
   helpers: Awaited<ReturnType<typeof createPoseidonHelpers>>,
 ) {
-  // Tagged deposit: originTag is derived by the contract from the assigned
-  // leafIndex and the deposit call context (chainId, depositor, tokenAddress,
-  // amount). The recipient reconstructs the same tag from the emitted event.
   const chainId = 31337n;
   const depositor = 0x00000000000000000000000000000000000000abn;
   const tokenAddress = 0x00000000000000000000000000000000000000bbn;
   const amount = 987_654_321n;
   const leafIndex = 3n;
-  const originTag = computeDepositOriginTag(helpers.pHash, {
-    chainId,
-    depositor,
-    tokenAddress,
-    amount,
-    leafIndex,
-  });
   const ownerNullifierKeyHash = computeOwnerNullifierKeyHash(helpers.pHash, 0x9191n);
   const noteSecret =
     0xfedcba987654321fedcba987654321fedcba987654321fedcba987654321fedn;
@@ -414,7 +398,6 @@ function buildScheme1BDepositVector(
     noteSecret,
     amount,
     tokenAddress,
-    originTag,
     leafIndex,
   });
 
@@ -427,7 +410,6 @@ function buildScheme1BDepositVector(
     noteSecret: recoveredPayload.noteSecret,
     amount,
     tokenAddress,
-    originTag,
     leafIndex,
   });
   if (recoveredCommitment !== noteCommitment) {
@@ -450,7 +432,6 @@ function buildScheme1BDepositVector(
         leafIndex: toHex32(leafIndex),
         nonce: bytesToHex(sealed.nonce),
         noteCommitment: toHex32(noteCommitment),
-        originTag: toHex32(originTag),
         outputNoteData: bytesToHex(sealed.outputNoteData),
         outputNoteDataHash: toHex32(noteDataHash(sealed.outputNoteData)),
         plaintext: bytesToHex(plaintext),
@@ -589,14 +570,13 @@ function mutateProof(proof: string): string {
   return bytesToHex(bytes);
 }
 
-// Scheme 1A plaintext (EIP Section 15.2): 160 bytes, 5 fields.
+// Scheme 1A plaintext (EIP Section 14.2): 128 bytes, 4 fields.
 function encodeScheme1ANote(note: NoteFields): Uint8Array {
-  const bytes = new Uint8Array(160);
+  const bytes = new Uint8Array(128);
   writeUint256(bytes, 0, note.amount);
   writeUint256(bytes, 32, note.ownerNullifierKeyHash);
   writeUint256(bytes, 64, note.noteSecret);
   writeUint256(bytes, 96, note.tokenAddress);
-  writeUint256(bytes, 128, note.originTag);
   return bytes;
 }
 
@@ -606,7 +586,6 @@ function decodeScheme1ANote(bytes: Uint8Array): NoteFields {
     ownerNullifierKeyHash: readUint256(bytes, 32),
     noteSecret: readUint256(bytes, 64),
     tokenAddress: readUint256(bytes, 96),
-    originTag: readUint256(bytes, 128),
   };
 }
 
@@ -614,7 +593,6 @@ function formatNote(note: NoteFields) {
   return {
     amount: toHex32(note.amount),
     ownerNullifierKeyHash: toHex32(note.ownerNullifierKeyHash),
-    originTag: toHex32(note.originTag),
     noteSecret: toHex32(note.noteSecret),
     tokenAddress: toHex32(note.tokenAddress),
   };

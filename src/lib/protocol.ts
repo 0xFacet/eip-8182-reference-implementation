@@ -5,7 +5,6 @@ import {
   NOTE_BODY_COMMITMENT_DOMAIN,
   NOTE_COMMITMENT_DOMAIN,
   NULLIFIER_DOMAIN,
-  ORIGIN_TAG_DOMAIN,
   OUTPUT_BINDING_DOMAIN,
   OWNER_COMMITMENT_DOMAIN,
   TRANSACTION_INTENT_DIGEST_DOMAIN,
@@ -22,7 +21,6 @@ export {
   NULLIFIER_DOMAIN,
   TRANSACT_NOTE_SECRET_DOMAIN,
   NOTE_SECRET_SEED_DOMAIN,
-  ORIGIN_TAG_DOMAIN,
   OWNER_COMMITMENT_DOMAIN,
   OWNER_NULLIFIER_KEY_HASH_DOMAIN,
   OUTPUT_BINDING_DOMAIN,
@@ -48,8 +46,6 @@ export const SINGLE_SIG_AUTHORIZATION_PRIMARY_TYPE =
 
 export const TRANSFER_OPERATION_KIND = 0n
 export const WITHDRAWAL_OPERATION_KIND = 1n
-export const ORIGIN_MODE_DEFAULT = 0n
-export const ORIGIN_MODE_REQUIRE_TAGGED = 1n
 export const LOCK_OUTPUT_BINDING_0 = 1n
 export const LOCK_OUTPUT_BINDING_1 = 2n
 export const LOCK_OUTPUT_BINDING_2 = 4n
@@ -65,9 +61,9 @@ const NAME_HASH_HEX =
 const VERSION_HASH_HEX =
   'c89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6'
 const EIP712_TYPE_HASH_HEX =
-  '79feac899af7279741df556d4c1f43267870af5c8c0633dec1f7e3681df5a6b3'
+  'f05605fc7fdcf2f5c7eee0a061dc32b03baa163e136bc873c4244e8538fab4e9'
 const SINGLE_SIG_AUTHORIZATION_TYPE_HASH_HEX =
-  '882e42c57a90f318a4d4a29863928e9fad7a836bafafe578d831cd689988c3c8'
+  'da453f7b71484c64d87f0d8ba606f9d814fe5b30bc5449afcb28a04f0529fe19'
 
 export interface ExecutionConstraints {
   executionConstraintsFlags: bigint
@@ -95,7 +91,6 @@ export interface ShieldedPoolIntentParams {
   amount: bigint
   feeRecipientAddress?: AddressLike
   feeAmount?: bigint
-  originMode?: bigint
   nonce: bigint
   validUntilSeconds: bigint
   executionConstraints?: ExecutionConstraintsInput
@@ -112,7 +107,6 @@ export interface TransactionIntentDigestParams {
   amount: bigint
   feeRecipientAddress?: AddressLike
   feeAmount?: bigint
-  originMode?: bigint
   nonce: bigint
   validUntilSeconds: bigint
   executionConstraints?: ExecutionConstraintsInput
@@ -127,7 +121,6 @@ export interface SingleSigAuthorizationParams {
   amount: bigint
   feeRecipientAddress?: AddressLike
   feeAmount?: bigint
-  originMode?: bigint
   nonce: bigint
   validUntilSeconds: bigint
   executionChainId: bigint
@@ -211,7 +204,7 @@ export function computeShieldedPoolIntentStructHash(
 ): Uint8Array {
   assertShieldedPoolIntentParams(params)
   const constraints = normalizeExecutionConstraints(params.executionConstraints)
-  const payload = new Uint8Array(544)
+  const payload = new Uint8Array(512)
   payload.set(hexToBytes(EIP712_TYPE_HASH_HEX), 0)
   writeUint256(payload, 32, addressToBigInt(params.authorizingAddress))
   writeUint256(payload, 64, params.policyVersion)
@@ -222,13 +215,12 @@ export function computeShieldedPoolIntentStructHash(
   writeUint256(payload, 224, params.amount)
   writeUint256(payload, 256, addressToBigInt(params.feeRecipientAddress ?? 0n))
   writeUint256(payload, 288, params.feeAmount ?? 0n)
-  writeUint256(payload, 320, params.originMode ?? ORIGIN_MODE_DEFAULT)
-  writeUint256(payload, 352, params.nonce)
-  writeUint256(payload, 384, params.validUntilSeconds)
-  writeUint256(payload, 416, constraints.executionConstraintsFlags)
-  writeUint256(payload, 448, constraints.lockedOutputBinding0)
-  writeUint256(payload, 480, constraints.lockedOutputBinding1)
-  writeUint256(payload, 512, constraints.lockedOutputBinding2)
+  writeUint256(payload, 320, params.nonce)
+  writeUint256(payload, 352, params.validUntilSeconds)
+  writeUint256(payload, 384, constraints.executionConstraintsFlags)
+  writeUint256(payload, 416, constraints.lockedOutputBinding0)
+  writeUint256(payload, 448, constraints.lockedOutputBinding1)
+  writeUint256(payload, 480, constraints.lockedOutputBinding2)
   return keccak_256(payload)
 }
 
@@ -237,7 +229,7 @@ export function computeSingleSigAuthorizationStructHash(
 ): Uint8Array {
   assertSingleSigAuthorizationParams(params)
 
-  const payload = new Uint8Array(352)
+  const payload = new Uint8Array(320)
   payload.set(hexToBytes(SINGLE_SIG_AUTHORIZATION_TYPE_HASH_HEX), 0)
   writeUint256(payload, 32, params.policyVersion)
   writeUint256(payload, 64, params.operationKind)
@@ -246,9 +238,8 @@ export function computeSingleSigAuthorizationStructHash(
   writeUint256(payload, 160, params.amount)
   writeUint256(payload, 192, addressToBigInt(params.feeRecipientAddress ?? 0n))
   writeUint256(payload, 224, params.feeAmount ?? 0n)
-  writeUint256(payload, 256, params.originMode ?? ORIGIN_MODE_DEFAULT)
-  writeUint256(payload, 288, params.nonce)
-  writeUint256(payload, 320, params.validUntilSeconds)
+  writeUint256(payload, 256, params.nonce)
+  writeUint256(payload, 288, params.validUntilSeconds)
   return keccak_256(payload)
 }
 
@@ -303,7 +294,6 @@ export function computeTransactionIntentDigest(
     params.amount,
     addressToBigInt(params.feeRecipientAddress ?? 0n),
     params.feeAmount ?? 0n,
-    params.originMode ?? ORIGIN_MODE_DEFAULT,
     constraints.executionConstraintsFlags,
     constraints.lockedOutputBinding0,
     constraints.lockedOutputBinding1,
@@ -338,7 +328,6 @@ export function computeNoteBodyCommitment(
     ownerCommitment: bigint
     amount: bigint
     tokenAddress: bigint
-    originTag: bigint
   },
   pHash: (values: bigint[]) => bigint,
 ): bigint {
@@ -347,7 +336,6 @@ export function computeNoteBodyCommitment(
     params.ownerCommitment,
     params.amount,
     params.tokenAddress,
-    params.originTag,
   ])
 }
 
@@ -358,28 +346,6 @@ export function computeFinalNoteCommitment(
   pHash: (values: bigint[]) => bigint,
 ): bigint {
   return pHash([NOTE_COMMITMENT_DOMAIN, noteBodyCommitment, leafIndex])
-}
-
-/// Deposit origin tag per EIP Section 12.1. Applies only when
-/// `originMode == ORIGIN_MODE_REQUIRE_TAGGED`.
-export function computeDepositOriginTag(
-  params: {
-    chainId: bigint
-    depositor: AddressLike
-    tokenAddress: AddressLike
-    amount: bigint
-    leafIndex: bigint
-  },
-  pHash: (values: bigint[]) => bigint,
-): bigint {
-  return pHash([
-    ORIGIN_TAG_DOMAIN,
-    params.chainId,
-    addressToBigInt(params.depositor),
-    addressToBigInt(params.tokenAddress),
-    params.amount,
-    params.leafIndex,
-  ])
 }
 
 export function computeIntentReplayId(
@@ -443,7 +409,6 @@ export function buildShieldedPoolIntentTypedData(
         { name: 'amount', type: 'uint256' },
         { name: 'feeRecipientAddress', type: 'address' },
         { name: 'feeAmount', type: 'uint256' },
-        { name: 'originMode', type: 'uint8' },
         { name: 'nonce', type: 'uint256' },
         { name: 'validUntilSeconds', type: 'uint32' },
         { name: 'executionConstraintsFlags', type: 'uint32' },
@@ -463,7 +428,6 @@ export function buildShieldedPoolIntentTypedData(
       amount: params.amount,
       feeRecipientAddress: addressToHex(params.feeRecipientAddress ?? 0n),
       feeAmount: params.feeAmount ?? 0n,
-      originMode: Number(params.originMode ?? ORIGIN_MODE_DEFAULT),
       nonce: params.nonce,
       validUntilSeconds: Number(params.validUntilSeconds),
       executionConstraintsFlags: Number(constraints.executionConstraintsFlags),
@@ -497,7 +461,6 @@ export function buildSingleSigAuthorizationTypedData(
         { name: 'amount', type: 'uint256' },
         { name: 'feeRecipientAddress', type: 'address' },
         { name: 'feeAmount', type: 'uint256' },
-        { name: 'originMode', type: 'uint8' },
         { name: 'nonce', type: 'uint256' },
         { name: 'validUntilSeconds', type: 'uint32' },
       ],
@@ -511,7 +474,6 @@ export function buildSingleSigAuthorizationTypedData(
       amount: params.amount,
       feeRecipientAddress: addressToHex(params.feeRecipientAddress ?? 0n),
       feeAmount: params.feeAmount ?? 0n,
-      originMode: Number(params.originMode ?? ORIGIN_MODE_DEFAULT),
       nonce: params.nonce,
       validUntilSeconds: Number(params.validUntilSeconds),
     },
@@ -628,7 +590,6 @@ function assertFieldBoundParams(
     policyVersion: bigint
     amount: bigint
     feeAmount?: bigint
-    originMode?: bigint
     nonce: bigint
     validUntilSeconds: bigint
     tokenAddress: AddressLike
@@ -641,7 +602,6 @@ function assertFieldBoundParams(
   assertCanonicalFieldValue(params.policyVersion, `${context} policyVersion`)
   assertCanonicalFieldValue(params.amount, `${context} amount`)
   assertCanonicalFieldValue(params.feeAmount ?? 0n, `${context} feeAmount`)
-  assertCanonicalFieldValue(params.originMode ?? ORIGIN_MODE_DEFAULT, `${context} originMode`)
   assertCanonicalFieldValue(params.nonce, `${context} nonce`)
   assertCanonicalFieldValue(params.validUntilSeconds, `${context} validUntilSeconds`)
   assertCanonicalFieldValue(params.operationKind, `${context} operationKind`)

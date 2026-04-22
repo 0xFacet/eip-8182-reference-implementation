@@ -16,7 +16,6 @@ export const NOTE_BODY_COMMITMENT_DOMAIN = deriveEip8182Domain("note_body_commit
 export const NOTE_COMMITMENT_DOMAIN = deriveEip8182Domain("note_commitment");
 export const NULLIFIER_DOMAIN = deriveEip8182Domain("nullifier");
 export const PHANTOM_NULLIFIER_DOMAIN = deriveEip8182Domain("phantom_nullifier");
-export const ORIGIN_TAG_DOMAIN = deriveEip8182Domain("origin_tag");
 export const INTENT_REPLAY_ID_DOMAIN = deriveEip8182Domain("intent_replay_id");
 export const OWNER_NULLIFIER_KEY_HASH_DOMAIN = deriveEip8182Domain("owner_nullifier_key_hash");
 export const TRANSACT_NOTE_SECRET_DOMAIN = deriveEip8182Domain("transact_note_secret");
@@ -69,7 +68,6 @@ export function computeTransactionIntentDigest(
     amount: bigint;
     feeRecipientAddress?: bigint;
     feeAmount?: bigint;
-    originMode?: bigint;
     executionConstraintsFlags?: bigint;
     lockedOutputBinding0?: bigint;
     lockedOutputBinding1?: bigint;
@@ -89,7 +87,6 @@ export function computeTransactionIntentDigest(
     params.amount,
     params.feeRecipientAddress ?? 0n,
     params.feeAmount ?? 0n,
-    params.originMode ?? 0n,
     params.executionConstraintsFlags ?? 0n,
     params.lockedOutputBinding0 ?? 0n,
     params.lockedOutputBinding1 ?? 0n,
@@ -144,7 +141,6 @@ export function computeNoteBodyCommitment(
     ownerCommitment: bigint;
     amount: bigint;
     tokenAddress: bigint;
-    originTag: bigint;
   },
 ): bigint {
   return hash([
@@ -152,7 +148,6 @@ export function computeNoteBodyCommitment(
     params.ownerCommitment,
     params.amount,
     params.tokenAddress,
-    params.originTag,
   ]);
 }
 
@@ -174,7 +169,6 @@ export function computeFullNoteCommitment(
     noteSecret: bigint;
     amount: bigint;
     tokenAddress: bigint;
-    originTag: bigint;
     leafIndex: bigint;
   },
 ): bigint {
@@ -183,31 +177,8 @@ export function computeFullNoteCommitment(
     ownerCommitment: oc,
     amount: params.amount,
     tokenAddress: params.tokenAddress,
-    originTag: params.originTag,
   });
   return computeFinalNoteCommitment(hash, body, params.leafIndex);
-}
-
-/// Deposit origin tag per EIP Section 12.1. Applies only when origin mode
-/// is `ORIGIN_MODE_REQUIRE_TAGGED`.
-export function computeDepositOriginTag(
-  hash: (values: bigint[]) => bigint,
-  params: {
-    chainId: bigint;
-    depositor: bigint;
-    tokenAddress: bigint;
-    amount: bigint;
-    leafIndex: bigint;
-  },
-): bigint {
-  return hash([
-    ORIGIN_TAG_DOMAIN,
-    params.chainId,
-    params.depositor,
-    params.tokenAddress,
-    params.amount,
-    params.leafIndex,
-  ]);
 }
 
 export function computeOutputBinding(

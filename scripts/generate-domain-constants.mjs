@@ -16,7 +16,6 @@ const DOMAIN_CONTEXTS = {
   NOTE_COMMITMENT_DOMAIN: 'note_commitment',
   NULLIFIER_DOMAIN: 'nullifier',
   PHANTOM_NULLIFIER_DOMAIN: 'phantom_nullifier',
-  ORIGIN_TAG_DOMAIN: 'origin_tag',
   INTENT_REPLAY_ID_DOMAIN: 'intent_replay_id',
   OWNER_NULLIFIER_KEY_HASH_DOMAIN: 'owner_nullifier_key_hash',
   TRANSACT_NOTE_SECRET_DOMAIN: 'transact_note_secret',
@@ -90,8 +89,6 @@ pub global AUTH_POLICY_TREE_DEPTH: u32 = 160;
 
 pub global TRANSFER_OP: Field = 0;
 pub global WITHDRAWAL_OP: Field = 1;
-pub global ORIGIN_MODE_DEFAULT: Field = 0;
-pub global ORIGIN_MODE_REQUIRE_TAGGED: Field = 1;
 
 pub global ADDRESS_BITS: u32 = 160;
 pub global AMOUNT_BITS: u32 = 248;

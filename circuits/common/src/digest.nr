@@ -3,7 +3,7 @@ use crate::constants::{
     INTENT_REPLAY_ID_DOMAIN,
     OUTPUT_BINDING_DOMAIN,
 };
-use crate::hash_utils::{p_hash3, p_hash5, p_hash17};
+use crate::hash_utils::{p_hash3, p_hash5, p_hash16};
 
 pub fn transaction_intent_digest(
     policy_version: Field,
@@ -14,7 +14,6 @@ pub fn transaction_intent_digest(
     amount: Field,
     fee_recipient_address: Field,
     fee_amount: Field,
-    origin_mode: Field,
     execution_constraints_flags: Field,
     locked_output_binding0: Field,
     locked_output_binding1: Field,
@@ -23,7 +22,7 @@ pub fn transaction_intent_digest(
     valid_until_seconds: Field,
     execution_chain_id: Field,
 ) -> Field {
-    p_hash17([
+    p_hash16([
         TRANSACTION_INTENT_DIGEST_DOMAIN,
         policy_version,
         authorizing_address,
@@ -33,7 +32,6 @@ pub fn transaction_intent_digest(
         amount,
         fee_recipient_address,
         fee_amount,
-        origin_mode,
         execution_constraints_flags,
         locked_output_binding0,
         locked_output_binding1,
@@ -65,23 +63,23 @@ pub fn intent_replay_id(
 
 #[test]
 fn test_transaction_intent_digest_deterministic() {
-    let d1 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
-    let d2 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
+    let d1 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
+    let d2 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
     assert(d1 == d2);
     assert(d1 != 0);
 }
 
 #[test]
 fn test_different_nonce_different_transaction_intent_digest() {
-    let d1 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
-    let d2 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 43, 1700000000, 1);
+    let d1 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
+    let d2 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 43, 1700000000, 1);
     assert(d1 != d2);
 }
 
 #[test]
 fn test_execution_constraints_change_transaction_intent_digest() {
-    let d1 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
-    let d2 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 1, 0x1234, 0, 0, 42, 1700000000, 1);
+    let d1 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 0, 0, 0, 0, 42, 1700000000, 1);
+    let d2 = transaction_intent_digest(1, 0xabc, 0, 0x1111, 0xdef, 1000, 0, 0, 1, 0x1234, 0, 0, 42, 1700000000, 1);
     assert(d1 != d2);
 }
 

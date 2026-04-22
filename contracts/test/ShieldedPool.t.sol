@@ -90,11 +90,11 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
         uint256 oc = PoseidonFieldLib.ownerCommitment(11, 777);
         assertEq(oc, Poseidon2Sponge.hash3(_deriveEip8182Domain("owner_commitment"), 11, 777));
 
-        uint256 body = PoseidonFieldLib.noteBodyCommitment(oc, 1 ether, 0, 0xdeadbeef);
+        uint256 body = PoseidonFieldLib.noteBodyCommitment(oc, 1 ether, 0);
         assertEq(
             body,
-            Poseidon2Sponge.hash5(
-                _deriveEip8182Domain("note_body_commitment"), oc, 1 ether, 0, 0xdeadbeef
+            Poseidon2Sponge.hash4(
+                _deriveEip8182Domain("note_body_commitment"), oc, 1 ether, 0
             )
         );
 
@@ -508,13 +508,13 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
     function test_DepositEthCreatesLeafSealedCommitment() public {
         uint256 ownerCommitment = PoseidonFieldLib.ownerCommitment(0xabc, 0xdef);
         uint256 leafIndex = 0;
-        uint256 expectedBody = PoseidonFieldLib.noteBodyCommitment(ownerCommitment, 1 ether, 0, 0);
+        uint256 expectedBody = PoseidonFieldLib.noteBodyCommitment(ownerCommitment, 1 ether, 0);
         uint256 expectedFinal = PoseidonFieldLib.noteCommitment(expectedBody, leafIndex);
 
         vm.deal(ALICE, 2 ether);
         vm.recordLogs();
         vm.prank(ALICE);
-        pool.deposit{value: 1 ether}(address(0), 1 ether, 0, ownerCommitment, hex"");
+        pool.deposit{value: 1 ether}(address(0), 1 ether, ownerCommitment, hex"");
 
         assertEq(address(pool).balance, 1 ether);
 
@@ -523,7 +523,7 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
         assertEq(
             dep.topics[0],
             keccak256(
-                "ShieldedPoolDeposit(address,uint256,uint256,uint256,uint256,uint256,uint256,bytes)"
+                "ShieldedPoolDeposit(address,uint256,uint256,uint256,uint256,uint256,bytes)"
             )
         );
         (
@@ -531,36 +531,15 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
             uint256 eventLeafIndex,
             uint256 amount,
             uint256 tokenAddress,
-            uint256 originTag,
             uint256 postInsertionCommitmentRoot,
             bytes memory outputNoteData
-        ) = abi.decode(dep.data, (uint256, uint256, uint256, uint256, uint256, uint256, bytes));
+        ) = abi.decode(dep.data, (uint256, uint256, uint256, uint256, uint256, bytes));
         assertEq(noteCommitment, expectedFinal);
         assertEq(eventLeafIndex, leafIndex);
         assertEq(amount, 1 ether);
         assertEq(tokenAddress, 0);
-        assertEq(originTag, 0);
         assertTrue(postInsertionCommitmentRoot != 0);
         assertEq(outputNoteData.length, 0);
-    }
-
-    function test_DepositEthTaggedOriginIncludesOriginTag() public {
-        uint256 ownerCommitment = PoseidonFieldLib.ownerCommitment(0xabc, 0xdef);
-        uint256 leafIndex = 0;
-        uint256 expectedOriginTag = PoseidonFieldLib.depositOriginTag(
-            block.chainid, uint256(uint160(ALICE)), 0, 1 ether, leafIndex
-        );
-
-        vm.deal(ALICE, 2 ether);
-        vm.recordLogs();
-        vm.prank(ALICE);
-        pool.deposit{value: 1 ether}(address(0), 1 ether, 1, ownerCommitment, hex"");
-
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        Vm.Log memory dep = logs[logs.length - 1];
-        (, , , , uint256 originTag, ,) =
-            abi.decode(dep.data, (uint256, uint256, uint256, uint256, uint256, uint256, bytes));
-        assertEq(originTag, expectedOriginTag);
     }
 
     function test_DepositEthRejectsValueMismatch() public {
@@ -568,29 +547,21 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
         vm.deal(ALICE, 2 ether);
         vm.prank(ALICE);
         vm.expectRevert(ShieldedPool.EthAmountMismatch.selector);
-        pool.deposit{value: 0.5 ether}(address(0), 1 ether, 0, ownerCommitment, hex"");
+        pool.deposit{value: 0.5 ether}(address(0), 1 ether, ownerCommitment, hex"");
     }
 
     function test_DepositRejectsZeroOwnerCommitment() public {
         vm.deal(ALICE, 2 ether);
         vm.prank(ALICE);
         vm.expectRevert(ShieldedPool.InvalidOwnerCommitment.selector);
-        pool.deposit{value: 1 ether}(address(0), 1 ether, 0, 0, hex"");
+        pool.deposit{value: 1 ether}(address(0), 1 ether, 0, hex"");
     }
 
     function test_DepositRejectsZeroAmount() public {
         vm.deal(ALICE, 2 ether);
         vm.prank(ALICE);
         vm.expectRevert(ShieldedPool.InvalidDepositAmount.selector);
-        pool.deposit{value: 0}(address(0), 0, 0, 1, hex"");
-    }
-
-    function test_DepositRejectsInvalidOriginMode() public {
-        uint256 ownerCommitment = PoseidonFieldLib.ownerCommitment(0xabc, 0xdef);
-        vm.deal(ALICE, 2 ether);
-        vm.prank(ALICE);
-        vm.expectRevert(ShieldedPool.InvalidOriginMode.selector);
-        pool.deposit{value: 1 ether}(address(0), 1 ether, 2, ownerCommitment, hex"");
+        pool.deposit{value: 0}(address(0), 0, 1, hex"");
     }
 
     function test_DepositERC20RejectsFeeOnTransferTokens() public {
@@ -601,7 +572,7 @@ contract ShieldedPoolTest is Test, InstallSystemTestBase {
         vm.startPrank(ALICE);
         token.approve(address(pool), type(uint256).max);
         vm.expectRevert(ERC20AssetLib.ERC20TransferAmountMismatch.selector);
-        pool.deposit(address(token), 5 ether, 0, ownerCommitment, hex"");
+        pool.deposit(address(token), 5 ether, ownerCommitment, hex"");
         vm.stopPrank();
     }
 

@@ -19,12 +19,10 @@ use privacy_pool_common::digest::{
 };
 use privacy_pool_common::hash_utils::hash_vk;
 use privacy_pool_common::note::{
-    assert_origin_mode_constraints,
     dummy_owner_nullifier_key_hash,
     full_note_commitment,
     note_body_commitment,
     note_nullifier,
-    origin_tag_for_spend,
     note_secret,
     note_secret_seed_hash,
     owner_commitment,
@@ -35,7 +33,6 @@ use privacy_pool_common::range::{
     assert_address,
     assert_amount,
     assert_execution_constraints_flags,
-    assert_origin_mode,
     assert_valid_until,
 };
 use privacy_pool_common::registry::{auth_membership_root, user_registry_membership_root};
@@ -109,7 +106,6 @@ fn main(
     change_amount: Field,
     fee_recipient_address: Field,   // from signed intent (may be 0)
     fee_amount: Field,              // from signed intent
-    origin_mode: Field, // signer-selected origin handling mode
     fee_note_recipient_address: Field,          // prover-chosen fee note recipient (constrained below)
 ) {
     // == Common assertions ==
@@ -129,7 +125,6 @@ fn main(
     assert_amount(payment_amount);
     assert_amount(change_amount);
     assert_amount(fee_amount);
-    assert_origin_mode(origin_mode);
     assert_valid_until(valid_until_seconds);
     assert_execution_constraints_flags(execution_constraints_flags);
     execution_constraints_flags.assert_max_bit_size::<3>();
@@ -207,7 +202,6 @@ fn main(
         authorized_amount,
         fee_recipient_address,
         fee_amount,
-        origin_mode,
         execution_constraints_flags,
         locked_output_binding0,
         locked_output_binding1,
@@ -291,16 +285,6 @@ fn main(
     let out1_note_secret = note_secret(note_secret_seed, intent_replay_id_value, 1);
     let out2_note_secret = note_secret(note_secret_seed, intent_replay_id_value, 2);
 
-    // == Origin tag derivation ==
-    // Deposits are contract-native, so the circuit only propagates tags from
-    // spent inputs to outputs.
-    let origin_tag = origin_tag_for_spend(
-        input0.is_phantom,
-        input0.note.origin_tag,
-        input1.is_phantom,
-        input1.note.origin_tag,
-    );
-
     // == Value conservation ==
     let input0_amount = if input0.is_phantom { 0 } else { input0.note.amount };
     let input1_amount = if input1.is_phantom { 0 } else { input1.note.amount };
@@ -320,7 +304,6 @@ fn main(
             note_secret: out0_note_secret,
             owner_nullifier_key_hash: recipient_leaf.owner_nullifier_key_hash,
             token_address,
-            origin_tag,
         }
     } else if out0_is_dummy {
         Note {
@@ -328,7 +311,6 @@ fn main(
             note_secret: out0_note_secret,
             owner_nullifier_key_hash: dummy_owner_nullifier_key_hash(),
             token_address: 0,
-            origin_tag: 0,
         }
     } else {
         // Withdrawal with change
@@ -337,7 +319,6 @@ fn main(
             note_secret: out0_note_secret,
             owner_nullifier_key_hash: sender_leaf.owner_nullifier_key_hash,
             token_address,
-            origin_tag,
         }
     };
 
@@ -354,7 +335,6 @@ fn main(
             note_secret: out1_note_secret,
             owner_nullifier_key_hash: dummy_owner_nullifier_key_hash(),
             token_address: 0,
-            origin_tag: 0,
         }
     } else {
         // Transfer change note
@@ -363,7 +343,6 @@ fn main(
             note_secret: out1_note_secret,
             owner_nullifier_key_hash: sender_leaf.owner_nullifier_key_hash,
             token_address,
-            origin_tag,
         }
     };
 
@@ -376,7 +355,6 @@ fn main(
             note_secret: out2_note_secret,
             owner_nullifier_key_hash: dummy_owner_nullifier_key_hash(),
             token_address: 0,
-            origin_tag: 0,
         }
     } else {
         Note {
@@ -384,27 +362,12 @@ fn main(
             note_secret: out2_note_secret,
             owner_nullifier_key_hash: sponsor_leaf.owner_nullifier_key_hash,
             token_address,
-            origin_tag,
         }
     };
 
     assert_real_output_amount(out0_is_dummy, out0.amount);
     assert_real_output_amount(out1_is_dummy, out1.amount);
     assert_real_output_amount(out2_is_dummy, out2.amount);
-
-    assert_origin_mode_constraints(
-        origin_mode,
-        input0.is_phantom,
-        input0.note.origin_tag,
-        input1.is_phantom,
-        input1.note.origin_tag,
-        out0_is_dummy,
-        out0.origin_tag,
-        out1_is_dummy,
-        out1.origin_tag,
-        out2_is_dummy,
-        out2.origin_tag,
-    );
 
     // == Value conservation ==
     let output_sum = out0.amount + out1.amount + out2.amount;
@@ -417,9 +380,9 @@ fn main(
     let owner_commit1 = owner_commitment(out1.owner_nullifier_key_hash, out1.note_secret);
     let owner_commit2 = owner_commitment(out2.owner_nullifier_key_hash, out2.note_secret);
 
-    let body0 = note_body_commitment(owner_commit0, out0.amount, out0.token_address, out0.origin_tag);
-    let body1 = note_body_commitment(owner_commit1, out1.amount, out1.token_address, out1.origin_tag);
-    let body2 = note_body_commitment(owner_commit2, out2.amount, out2.token_address, out2.origin_tag);
+    let body0 = note_body_commitment(owner_commit0, out0.amount, out0.token_address);
+    let body1 = note_body_commitment(owner_commit1, out1.amount, out1.token_address);
+    let body2 = note_body_commitment(owner_commit2, out2.amount, out2.token_address);
 
     assert(body0 == note_body_commitment0_out);
     assert(body1 == note_body_commitment1_out);

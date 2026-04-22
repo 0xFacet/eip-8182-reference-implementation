@@ -5,7 +5,6 @@ pub struct Note {
     pub note_secret: Field,
     pub owner_nullifier_key_hash: Field,
     pub token_address: Field,
-    pub origin_tag: Field,
 }
 
 pub struct UserRegistryLeaf {

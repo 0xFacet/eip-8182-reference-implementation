@@ -9,7 +9,6 @@ recipient_address = "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a"
 amount = "0x1"
 fee_recipient_address = "0x0"
 fee_amount = "0x0"
-origin_mode = "0x0"
 nonce = ["0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "42"]
 valid_until_seconds = "0xe11"
 

@@ -67,7 +67,6 @@ async function main() {
       amount: common.amount,
       feeRecipientAddress: common.feeRecipientAddress,
       feeAmount: common.feeAmount,
-      originMode: common.originMode,
       nonce: common.nonce,
       validUntilSeconds: common.validUntilSeconds,
       executionConstraints: common.executionConstraints,
