@@ -50,10 +50,6 @@ export const LOCK_OUTPUT_BINDING_0 = 1n
 export const LOCK_OUTPUT_BINDING_1 = 2n
 export const LOCK_OUTPUT_BINDING_2 = 4n
 
-export const MULTISIG_AUTH_DOMAIN = 0x6d756c74697369675f61757468n
-export const MULTISIG_2OF3_SIGNERS = 3n
-export const MULTISIG_2OF3_THRESHOLD = 2n
-
 const DOMAIN_TYPE_HASH_HEX =
   '8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f'
 const NAME_HASH_HEX =
@@ -516,53 +512,6 @@ export function secp256k1PubkeyToAddress(
     address = (address << 8n) | BigInt(byte)
   }
   return address
-}
-
-export interface CanonicalMultisigSigner<T> {
-  originalIndex: number
-  pubKeyX: Uint8Array
-  pubKeyY: Uint8Array
-  signerCommitment: bigint
-  value: T
-}
-
-export function canonicalizeMultisigSigners<T extends { pubKeyX: Uint8Array; pubKeyY: Uint8Array }>(
-  signers: T[],
-  pHash4: (values: bigint[]) => bigint,
-): CanonicalMultisigSigner<T>[] {
-  const canonical = signers.map((value, originalIndex) => ({
-    originalIndex,
-    pubKeyX: value.pubKeyX,
-    pubKeyY: value.pubKeyY,
-    signerCommitment: secp256k1AuthCommitment(value.pubKeyX, value.pubKeyY, pHash4),
-    value,
-  }))
-
-  canonical.sort((left, right) =>
-    left.signerCommitment < right.signerCommitment ? -1 : left.signerCommitment > right.signerCommitment ? 1 : 0,
-  )
-
-  for (let i = 1; i < canonical.length; i++) {
-    if (canonical[i - 1].signerCommitment === canonical[i].signerCommitment) {
-      throw new Error('multisig signers must be sorted and unique by auth commitment')
-    }
-  }
-
-  return canonical
-}
-
-export function multisigAuthDataCommitment(
-  signerCommitments: bigint[],
-  pHash2: (values: bigint[]) => bigint,
-  pHash3: (values: bigint[]) => bigint,
-  signerCount: bigint = MULTISIG_2OF3_SIGNERS,
-  threshold: bigint = MULTISIG_2OF3_THRESHOLD,
-): bigint {
-  let acc = pHash3([MULTISIG_AUTH_DOMAIN, signerCount, threshold])
-  for (const signerCommitment of signerCommitments) {
-    acc = pHash2([acc, signerCommitment])
-  }
-  return acc
 }
 
 function writeUint256(buf: Uint8Array, offset: number, value: bigint) {

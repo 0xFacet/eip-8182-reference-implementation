@@ -139,11 +139,10 @@ If you have already skimmed the EIP, read the repo in this order:
 
 1. `circuits/inner/common/` — the shared inner-circuit authoring API
 2. `circuits/inner/eip712/` — the baseline single-sig companion-standard inner circuit
-3. `circuits/inner/multisig_2of3/` — the threshold-auth example
-4. `circuits/outer/` — the shared pool protocol circuit that consumes the inner proof
-5. `src/lib/` — TypeScript protocol parity helpers
-6. `integration/src/` — host-side witness builders and proof runners
-7. `contracts/` — the on-chain verifier and settlement surface
+3. `circuits/outer/` — the shared pool protocol circuit that consumes the inner proof
+4. `src/lib/` — TypeScript protocol parity helpers
+5. `integration/src/` — host-side witness builders and proof runners
+6. `contracts/` — the on-chain verifier and settlement surface
 
 ## Two-circuit architecture
 
@@ -183,7 +182,7 @@ The outer circuit consumes those two outputs and does the rest.
 The intended dependency direction is:
 
 - `circuits/inner/common` defines the shared inner authoring surface
-- runnable inner circuits like `eip712` and `multisig_2of3` depend on that shared inner library
+- the runnable `eip712` inner circuit depends on that shared inner library
 - the outer circuit does **not** depend on inner policy details; it only depends on the inner proof's public outputs
 - `src/lib` mirrors protocol hashes / encodings in TypeScript
 - `integration/src` turns app/test inputs into Noir witnesses and runs the inner and outer proof steps
@@ -196,7 +195,6 @@ circuits/
   inner/
     common/                  shared inner-circuit authoring library
     eip712/                  baseline single-sig companion-standard inner circuit
-    multisig_2of3/           2-of-3 threshold multisig example
   outer/                     shared protocol / settlement circuit
   vendor/                    vendored Noir dependencies
 
@@ -238,7 +236,7 @@ The rule for reading or writing an inner circuit:
 - each inner circuit defines its own policy / approval witnesses
 - the inner circuit validates intent, checks approvals, and returns `InnerOutputs`
 
-## The two included inner circuits
+## The included inner circuit
 
 ### `circuits/inner/eip712`
 
@@ -250,25 +248,7 @@ The baseline single-sig companion-standard example. It is deliberately narrower 
 - `authorizingAddress` is derived from the secp256k1 public key
 - `authDataCommitment` is `poseidon(xHi, xLo, yHi, yLo)` over the signer's 32-byte big-endian secp256k1 coordinates, split into 128-bit limbs
 
-Read this first if you want the smallest complete inner circuit.
-
-### `circuits/inner/multisig_2of3`
-
-Threshold authorization using the full `Intent` struct. Read this after `eip712` to see what is shared vs what is policy-specific.
-
-What changes relative to `eip712`:
-
-- the witness includes a multisig policy and threshold approvals
-- the challenge is built from the shared `Intent`
-- the auth logic checks distinct approving signers
-
-What stays the same:
-
-- the intent validation surface
-- the final output shape
-- the handoff to the outer circuit via `InnerOutputs`
-
-The outer circuit does not need to understand either policy struct. It only needs `auth_data_commitment` and `transaction_intent_digest`. Each policy module reduces itself to an `Authorization` with an `auth_data_commitment`, which the contract and outer circuit match against the registered auth-policy leaf.
+The outer circuit does not need to understand the policy struct. It only needs `auth_data_commitment` and `transaction_intent_digest`. A policy module reduces itself to an `Authorization` with an `auth_data_commitment`, which the contract and outer circuit match against the registered auth-policy leaf.
 
 ## TypeScript layers
 
@@ -278,12 +258,7 @@ Two files: `protocol.ts` (EIP-712 struct hashing, intent digest computation, dom
 
 ### `integration/src/`
 
-Host-side proof orchestration: witness builders for inner and outer circuits, proof runners for tests and fixtures, helpers that bridge app/test inputs into Noir. Two scripts generate proofs for the E2E tests:
-
-- `generate_eip712_proof.ts` — single-sig EIP-712 proofs (deposit, transfer, withdrawal)
-- `generate_multisig_proof.ts` — 2-of-3 multisig proofs (all modes)
-
-Both are called by the Solidity E2E tests via Foundry FFI.
+Host-side proof orchestration: witness builders for inner and outer circuits, proof runners for tests and fixtures, helpers that bridge app/test inputs into Noir. `generate_eip712_proof.ts` produces single-sig EIP-712 proofs (deposit, transfer, withdrawal) and is called by the Solidity E2E tests via Foundry FFI.
 
 ## Prover sidecar
 

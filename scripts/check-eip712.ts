@@ -3,7 +3,6 @@ import { ethers } from 'ethers'
 import {
   LOCK_OUTPUT_BINDING_0,
   LOCK_OUTPUT_BINDING_2,
-  MULTISIG_AUTH_DOMAIN,
   buildShieldedPoolIntentTypedData,
   bytesToHex,
   computeShieldedPoolIntentSigningHash,
@@ -18,7 +17,7 @@ const EXPECTED_INTENT_TYPE_HASH =
 const sampleIntent = {
   authorizingAddress: 0x7e5f4552091a69125d5dfcb7b8c2659029395bdfn,
   policyVersion: 1n,
-  authDomainTag: MULTISIG_AUTH_DOMAIN,
+  authDomainTag: 0x73696e676c655f61757468n,
   operationKind: 0n,
   tokenAddress: 0x1000000000000000000000000000000000000001n,
   recipientAddress: 0x2000000000000000000000000000000000000002n,

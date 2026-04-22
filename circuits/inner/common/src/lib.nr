@@ -1,6 +1,5 @@
 pub mod curve_point;
 pub mod field_set;
-pub mod multisig;
 pub mod secp256k1;
 pub mod single_sig;
 use keccak256::keccak256;
