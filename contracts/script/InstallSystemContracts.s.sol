@@ -8,116 +8,91 @@ import {console2} from "forge-std/console2.sol";
 import {ShieldedPool} from "../src/ShieldedPool.sol";
 import {PoseidonFieldLib} from "../src/libraries/PoseidonFieldLib.sol";
 
+/// @notice One-time genesis-state initializer for ShieldedPool. Extends the
+///         production contract with an `initialize()` selector that fills the
+///         four empty-subtree caches (note tree, user-registry sparse, auth
+///         registration, auth revocation sparse) and seeds the corresponding
+///         current roots so the very first append produces the correct value.
+///
+///         The harness is etched at SHIELDED_POOL_ADDRESS, `initialize()` is
+///         called, and then the production runtime code is etched back. The
+///         resulting state dump is what gets installed at activation-fork
+///         genesis (Section 5.1).
 contract ShieldedPoolInstallHarness is ShieldedPool {
     function initialize() external {
-        uint256 noteCommitmentRoot = _deriveEmptyRoot(COMMITMENT_TREE_DEPTH);
-        uint256 userRegistryRoot = _deriveEmptyRoot(REGISTRY_TREE_DEPTH);
-        uint256 authPolicyRoot = userRegistryRoot;
-
-        _seedEmptyHashCache();
-        currentNoteCommitmentRoot = noteCommitmentRoot;
-        currentUserRegistryRoot = userRegistryRoot;
-        currentAuthPolicyRoot = authPolicyRoot;
-    }
-
-    function _seedEmptyHashCache() private {
+        // Note tree (depth 32, append-only).
         noteCommitmentEmptyHashes[0] = 0;
-        for (uint256 level = 1; level < COMMITMENT_TREE_DEPTH; ++level) {
-            noteCommitmentEmptyHashes[level] =
-                PoseidonFieldLib.merkleHash(noteCommitmentEmptyHashes[level - 1], noteCommitmentEmptyHashes[level - 1]);
+        for (uint256 i = 1; i < COMMITMENT_TREE_DEPTH; ++i) {
+            noteCommitmentEmptyHashes[i] = PoseidonFieldLib.merkleHash(
+                noteCommitmentEmptyHashes[i - 1], noteCommitmentEmptyHashes[i - 1]
+            );
         }
+        currentNoteCommitmentRoot = PoseidonFieldLib.merkleHash(
+            noteCommitmentEmptyHashes[COMMITMENT_TREE_DEPTH - 1],
+            noteCommitmentEmptyHashes[COMMITMENT_TREE_DEPTH - 1]
+        );
 
-        sparseEmptyHashes[0] = 0;
-        for (uint256 level = 1; level < REGISTRY_TREE_DEPTH; ++level) {
-            sparseEmptyHashes[level] =
-                PoseidonFieldLib.merkleHash(sparseEmptyHashes[level - 1], sparseEmptyHashes[level - 1]);
+        // User-registry sparse tree (depth 160).
+        userRegistrySparseEmptyHashes[0] = 0;
+        for (uint256 i = 1; i < REGISTRY_TREE_DEPTH; ++i) {
+            userRegistrySparseEmptyHashes[i] = PoseidonFieldLib.merkleHash(
+                userRegistrySparseEmptyHashes[i - 1], userRegistrySparseEmptyHashes[i - 1]
+            );
         }
-    }
+        currentUserRegistryRoot = PoseidonFieldLib.merkleHash(
+            userRegistrySparseEmptyHashes[REGISTRY_TREE_DEPTH - 1],
+            userRegistrySparseEmptyHashes[REGISTRY_TREE_DEPTH - 1]
+        );
 
-    function _deriveEmptyRoot(uint256 depth) private pure returns (uint256 root) {
-        for (uint256 level; level < depth; ++level) {
-            root = PoseidonFieldLib.merkleHash(root, root);
+        // Auth-policy registration tree (depth 32, append-only).
+        authPolicyRegistrationEmptyHashes[0] = 0;
+        for (uint256 i = 1; i < AUTH_POLICY_TREE_DEPTH; ++i) {
+            authPolicyRegistrationEmptyHashes[i] = PoseidonFieldLib.merkleHash(
+                authPolicyRegistrationEmptyHashes[i - 1], authPolicyRegistrationEmptyHashes[i - 1]
+            );
         }
+        currentAuthPolicyRegistrationRoot = PoseidonFieldLib.merkleHash(
+            authPolicyRegistrationEmptyHashes[AUTH_POLICY_TREE_DEPTH - 1],
+            authPolicyRegistrationEmptyHashes[AUTH_POLICY_TREE_DEPTH - 1]
+        );
+
+        // Auth-policy revocation sparse tree (depth 32).
+        authPolicyRevocationSparseEmptyHashes[0] = 0;
+        for (uint256 i = 1; i < AUTH_POLICY_TREE_DEPTH; ++i) {
+            authPolicyRevocationSparseEmptyHashes[i] = PoseidonFieldLib.merkleHash(
+                authPolicyRevocationSparseEmptyHashes[i - 1], authPolicyRevocationSparseEmptyHashes[i - 1]
+            );
+        }
+        currentAuthPolicyRevocationRoot = PoseidonFieldLib.merkleHash(
+            authPolicyRevocationSparseEmptyHashes[AUTH_POLICY_TREE_DEPTH - 1],
+            authPolicyRevocationSparseEmptyHashes[AUTH_POLICY_TREE_DEPTH - 1]
+        );
     }
 }
 
 abstract contract InstallSystemContractsBase is CommonBase {
-    uint256 internal constant INSTALL_COMMITMENT_TREE_DEPTH = 32;
-    uint256 internal constant INSTALL_REGISTRY_TREE_DEPTH = 160;
     address internal constant POOL_ADDRESS = 0x0000000000000000000000000000000000081820;
 
-    function install() internal returns (uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot) {
-        _initializePool();
-        (noteCommitmentRoot, userRegistryRoot, authPolicyRoot) = ShieldedPool(POOL_ADDRESS).getCurrentRoots();
-        _assertExpectedRoots(noteCommitmentRoot, userRegistryRoot, authPolicyRoot);
-    }
-
-    function writeManifest(
-        uint256 noteCommitmentRoot,
-        uint256 userRegistryRoot,
-        uint256 authPolicyRoot,
-        string memory outputPath
-    ) internal {
-        bytes memory poolCode = POOL_ADDRESS.code;
-        string memory manifestKey = "manifest";
-        vm.serializeJson(manifestKey, "{}");
-        vm.serializeAddress(manifestKey, "poolAddress", POOL_ADDRESS);
-        vm.serializeUint(manifestKey, "installBlockNumber", block.number);
-        vm.serializeBytes32(manifestKey, "poolCodeHash", bytes32(keccak256(poolCode)));
-        string memory manifestJson = vm.serializeUint(manifestKey, "poolCodeSize", poolCode.length);
-        vm.writeJson(manifestJson, outputPath);
-        vm.writeJson(_derivedRootsJson(noteCommitmentRoot, userRegistryRoot, authPolicyRoot), outputPath, ".derivedRoots");
-        _prettifyJson(outputPath);
+    function install()
+        internal
+        returns (
+            uint256 noteCommitmentRoot,
+            uint256 userRegistryRoot,
+            uint256 authPolicyRegistrationRoot,
+            uint256 authPolicyRevocationRoot
+        )
+    {
+        vm.etch(POOL_ADDRESS, type(ShieldedPoolInstallHarness).runtimeCode);
+        ShieldedPoolInstallHarness(POOL_ADDRESS).initialize();
+        vm.etch(POOL_ADDRESS, type(ShieldedPool).runtimeCode);
+        vm.setNonce(POOL_ADDRESS, 1);
+        return ShieldedPool(POOL_ADDRESS).getCurrentRoots();
     }
 
     function writeStateDump(string memory outputPath) internal {
         vm.dumpState(outputPath);
         _filterStateDumpToPool(outputPath);
         _prettifyJson(outputPath);
-    }
-
-    function _initializePool() private {
-        vm.etch(POOL_ADDRESS, type(ShieldedPoolInstallHarness).runtimeCode);
-        ShieldedPoolInstallHarness(POOL_ADDRESS).initialize();
-        vm.etch(POOL_ADDRESS, type(ShieldedPool).runtimeCode);
-        vm.setNonce(POOL_ADDRESS, 1);
-    }
-
-    function _assertExpectedRoots(uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot) private pure {
-        uint256 expectedCommitmentRoot = _deriveEmptyRoot(INSTALL_COMMITMENT_TREE_DEPTH);
-        uint256 expectedSparseRoot = _deriveEmptyRoot(INSTALL_REGISTRY_TREE_DEPTH);
-
-        require(noteCommitmentRoot == expectedCommitmentRoot, "unexpected commitment root");
-        require(userRegistryRoot == expectedSparseRoot, "unexpected user registry root");
-        require(authPolicyRoot == expectedSparseRoot, "unexpected auth policy root");
-    }
-
-    function _deriveEmptyRoot(uint256 depth) private pure returns (uint256 root) {
-        for (uint256 level; level < depth; ++level) {
-            root = PoseidonFieldLib.merkleHash(root, root);
-        }
-    }
-
-    function _derivedRootsJson(uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot)
-        private
-        returns (string memory derivedRoots)
-    {
-        string memory derivedRootsKey = "derivedRoots";
-        vm.serializeJson(derivedRootsKey, "{}");
-        vm.serializeUint(derivedRootsKey, "noteCommitmentRoot", noteCommitmentRoot);
-        vm.serializeUint(derivedRootsKey, "userRegistryRoot", userRegistryRoot);
-        derivedRoots = vm.serializeUint(derivedRootsKey, "authPolicyRoot", authPolicyRoot);
-    }
-
-    function _prettifyJson(string memory outputPath) private {
-        string[] memory jqCommand = new string[](4);
-        jqCommand[0] = "jq";
-        jqCommand[1] = "--sort-keys";
-        jqCommand[2] = ".";
-        jqCommand[3] = outputPath;
-        Vm.FfiResult memory jqResult = vm.tryFfi(jqCommand);
-        require(jqResult.exitCode == 0, string.concat("jq failed for ", outputPath));
-        vm.writeFile(outputPath, string(jqResult.stdout));
     }
 
     function _filterStateDumpToPool(string memory outputPath) private {
@@ -129,43 +104,41 @@ abstract contract InstallSystemContractsBase is CommonBase {
         jqCommand[4] = "--sort-keys";
         jqCommand[5] = "with_entries(select((.key | ascii_downcase) == ($poolAddress | ascii_downcase)))";
         jqCommand[6] = outputPath;
-        Vm.FfiResult memory jqResult = vm.tryFfi(jqCommand);
-        require(jqResult.exitCode == 0, string.concat("jq filter failed for ", outputPath));
-        vm.writeFile(outputPath, string(jqResult.stdout));
+        Vm.FfiResult memory r = vm.tryFfi(jqCommand);
+        require(r.exitCode == 0, "jq filter failed");
+        vm.writeFile(outputPath, string(r.stdout));
+    }
+
+    function _prettifyJson(string memory outputPath) private {
+        string[] memory jqCommand = new string[](4);
+        jqCommand[0] = "jq";
+        jqCommand[1] = "--sort-keys";
+        jqCommand[2] = ".";
+        jqCommand[3] = outputPath;
+        Vm.FfiResult memory r = vm.tryFfi(jqCommand);
+        require(r.exitCode == 0, "jq prettify failed");
+        vm.writeFile(outputPath, string(r.stdout));
     }
 }
 
 contract InstallSystemContracts is Script, InstallSystemContractsBase {
     function run() public {
-        string memory manifestPath = _envManifestPath();
-        string memory stateDumpPath = _envStateDumpPath();
-        (uint256 noteCommitmentRoot, uint256 userRegistryRoot, uint256 authPolicyRoot) =
-            install();
-        writeManifest(noteCommitmentRoot, userRegistryRoot, authPolicyRoot, manifestPath);
+        string memory stateDumpPath =
+            vm.envOr("STATE_DUMP_PATH", string("build/shielded-pool-state.json"));
+
+        (
+            uint256 noteCommitmentRoot,
+            uint256 userRegistryRoot,
+            uint256 authPolicyRegistrationRoot,
+            uint256 authPolicyRevocationRoot
+        ) = install();
         writeStateDump(stateDumpPath);
-        _logInstall(noteCommitmentRoot, userRegistryRoot, authPolicyRoot, manifestPath, stateDumpPath);
-    }
 
-    function _envManifestPath() internal view returns (string memory) {
-        return vm.envOr("INSTALL_MANIFEST_PATH", string("script-output/shielded-pool-install.json"));
-    }
-
-    function _envStateDumpPath() internal view returns (string memory) {
-        return vm.envOr("STATE_DUMP_PATH", string("script-output/shielded-pool-state.json"));
-    }
-
-    function _logInstall(
-        uint256 noteCommitmentRoot,
-        uint256 userRegistryRoot,
-        uint256 authPolicyRoot,
-        string memory manifestPath,
-        string memory stateDumpPath
-    ) internal pure {
-        console2.log("manifest:", manifestPath);
         console2.log("state dump:", stateDumpPath);
         console2.log("pool:", POOL_ADDRESS);
         console2.log("commitment root:", noteCommitmentRoot);
         console2.log("user registry root:", userRegistryRoot);
-        console2.log("auth policy root:", authPolicyRoot);
+        console2.log("auth policy registration root:", authPolicyRegistrationRoot);
+        console2.log("auth policy revocation root:", authPolicyRevocationRoot);
     }
 }

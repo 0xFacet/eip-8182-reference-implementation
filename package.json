@@ -1,49 +1,23 @@
 {
-  "name": "eip-8182-reference-implementation",
-  "private": true,
+  "name": "eip-8182-reference-implementation-snark",
   "version": "0.1.0",
-  "type": "module",
+  "private": true,
+  "description": "Reference implementation for EIP-8182 (Groth16/BN254 split-proof variant). Circuits, contracts, helpers, and asset-bundle tooling.",
+  "license": "CC0-1.0",
+  "type": "commonjs",
   "scripts": {
-    "check:domains": "node scripts/generate-domain-constants.mjs --check",
-    "check:eip712": "tsx scripts/check-eip712.ts",
-    "sync:domains": "node scripts/generate-domain-constants.mjs",
-    "contracts:build": "cd contracts && forge build",
-    "contracts:verifier:refresh": "node scripts/sync-honk-verifier.mjs",
-    "contracts:verifier:check": "node scripts/sync-honk-verifier.mjs --check",
-    "execution-spec-assets:refresh": "node scripts/sync-execution-spec-assets.mjs",
-    "execution-spec-assets:check": "node scripts/sync-execution-spec-assets.mjs --check",
-    "pyspec:test": "PYTHONPATH=pyspec/src python3 -m unittest discover -s pyspec/tests -v",
-    "test:execution-specs": "npm run test:unit && npm run pyspec:test && npm run test:execution-spec-assets && node scripts/run-contract-tests.mjs --match-contract VerifierPrecompileIntegrationTest -vv",
-    "execution-specs:check": "npm run execution-spec-assets:check && npm run contracts:verifier:check && npm run test:execution-specs",
-    "bench:eip712-proofs": "node scripts/benchmark-eip712-proofs.mjs",
-    "test": "npm run test:slow",
-    "test:circuits": "cd circuits && env HOME=/tmp/codex/eip8182-tool-home NARGO_HOME=/tmp/codex/eip8182-tool-home/.nargo nargo test --workspace",
-    "test:unit": "npm run check:domains && npm run check:eip712 && node scripts/run-contract-tests.mjs --match-contract 'ShieldedPoolTest|InstallSystemContractsScriptTest'",
-    "test:execution-spec-assets": "node scripts/run-contract-tests.mjs --match-contract ExecutionSpecAssetBundleTest -vv",
-    "test:real-verifier": "node scripts/run-contract-tests.mjs --match-contract VerifierPrecompileIntegrationTest -vv",
-    "test:slow": "npm run test:unit && npm run test:execution-spec-assets && npm run test:real-verifier",
-    "test:all": "npm run test:slow",
-    "prover:start": "tsx prover/src/index.ts",
-    "prover:dev": "tsx watch prover/src/index.ts",
-    "bench:variant": "node scripts/benchmark-variant.mjs",
-    "bench:variant:verify": "node scripts/benchmark-variant.mjs --verify"
+    "build:pool": "bash scripts/circuit/build_pool.sh",
+    "build:session": "node scripts/integration/build_session.js",
+    "refresh:assets": "bash scripts/assets/refresh.sh",
+    "test:contracts": "forge test"
   },
   "dependencies": {
-    "@aztec/bb.js": "4.0.0-nightly.20260120",
-    "@fastify/cors": "^10.0.0",
-    "@noble/curves": "^2.0.1",
-    "@noble/hashes": "^1.8.0",
-    "@noble/post-quantum": "^0.5.4",
-    "@noble/secp256k1": "^2.3.0",
-    "@noir-lang/noir_js": "1.0.0-beta.19",
-    "ethers": "^5.7.2",
-    "fastify": "^5.0.0",
-    "piscina": "^5.1.0",
-    "viem": "^2.45.0"
+    "snarkjs": "^0.7.6",
+    "circomlibjs": "^0.1.7",
+    "ethers": "^6.13.4",
+    "ffjavascript": "^0.3.0"
   },
-  "devDependencies": {
-    "@types/node": "^24.6.0",
-    "tsx": "^4.21.0",
-    "typescript": "^5.9.0"
+  "engines": {
+    "node": ">=20"
   }
 }

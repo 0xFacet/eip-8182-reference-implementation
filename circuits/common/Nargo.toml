@@ -1,8 +1,0 @@
-[package]
-name = "privacy_pool_common"
-type = "lib"
-authors = ["OpenAI"]
-compiler_version = ">=1.0.0"
-
-[dependencies]
-poseidon = { path = "../vendor/poseidon" }
