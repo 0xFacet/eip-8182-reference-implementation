@@ -138,6 +138,11 @@ function run(cmd, args, opts = {}) {
   };
   fs.writeFileSync(path.join(OUT, "session.json"), JSON.stringify(session, null, 2));
   console.log("wrote", path.join(OUT, "session.json"));
+
+  // Persist prove timings so the bench renderer doesn't have to scrape stdout.
+  const timings = { pool_prove_ms: t1 - t0, auth_prove_ms: t3 - t2 };
+  fs.writeFileSync(path.join(OUT, "timings.json"), JSON.stringify(timings, null, 2));
+  console.log("wrote", path.join(OUT, "timings.json"));
   process.exit(0);
 })().catch((e) => {
   console.error(e);

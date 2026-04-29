@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Build circuits-noir/auth/Prover.toml from a coordinated set of intent +
-// signing values. Produces a sidecar JSON that build_real_session.js (and
+// signing values. Produces a sidecar JSON that build_honk_session.js (and
 // the integration test) consume so the auth circuit's public outputs match
 // the pool circuit's intent commitments.
 //
@@ -92,9 +92,9 @@ function defaultIntent(authVerifierAddr, authorizingAddress) {
 function lockedOutputBindings(intent) {
   // Computed by pool circuit per Section 9.11. For our purposes we just need
   // values that match what the pool side computes. We'll re-derive in
-  // build_real_session.js once we have the output note bodies; here, allow
+  // build_honk_session.js once we have the output note bodies; here, allow
   // the caller to provide them via shared.json. If not provided, use 0 (the
-  // bench-only mode). build_real_session.js overwrites with the real values.
+  // bench-only mode). build_honk_session.js overwrites with the real values.
   return [intent.locked_output_binding0, intent.locked_output_binding1, intent.locked_output_binding2];
 }
 
@@ -318,7 +318,7 @@ async function main() {
   ];
   writeProverToml(lines.join("\n") + "\n");
 
-  // -- Sidecar JSON for build_real_session.js + integration test --
+  // -- Sidecar JSON for build_honk_session.js + integration test --
   const sidecar = {
     private_key_hex: privKeyHex,
     pubkey_x_hex: ethers.hexlify(pkx),

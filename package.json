@@ -9,7 +9,8 @@
     "build:pool": "bash scripts/circuit/build_pool.sh",
     "build:session": "node scripts/integration/build_session.js",
     "refresh:assets": "bash scripts/assets/refresh.sh",
-    "test:contracts": "forge test"
+    "test:contracts": "forge test",
+    "bench": "bash scripts/bench/run.sh"
   },
   "dependencies": {
     "snarkjs": "^0.7.6",

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Coordinated session builder for the realistic-auth integration test.
+// Coordinated session builder for the Honk auth end-to-end test.
 //
 // 1. Run scripts/noir/gen_prover_toml.js to produce a deterministic keypair,
 //    EIP-712 signature, and side-car JSON with the pubkey-derived
@@ -8,8 +8,8 @@
 //    vm.etch can place RealAuthVerifier at the same address the pool proof
 //    commits to).
 //
-// 2. Run scripts/noir/gen_real_pool_witness_input.js to produce
-//    build/integration_real/pool_input.json with those same values.
+// 2. Run scripts/noir/gen_honk_pool_witness_input.js to produce
+//    build/integration_honk/pool_input.json with those same values.
 //
 // 3. Read the lockedOutputBinding{0,1,2} values the pool witness derived
 //    from the output note bodies, re-run gen_prover_toml.js with a shared
@@ -26,7 +26,7 @@
 //    (blinded auth commitment) and pool.publicSignals[20] ==
 //    auth.public_inputs[1] (transaction intent digest).
 //
-// 7. Write build/integration_real/session.json with both proofs and the pool's
+// 7. Write build/integration_honk/session.json with both proofs and the pool's
 //    public signals (plus a copy of the sidecar values for the test).
 
 const fs = require("fs");
@@ -35,13 +35,32 @@ const { spawnSync } = require("child_process");
 const snarkjs = require("snarkjs");
 
 const ROOT = path.resolve(__dirname, "..", "..");
-const REAL_DIR = path.join(ROOT, "build", "integration_real");
-const POOL_INPUT = path.join(REAL_DIR, "pool_input.json");
-const POOL_WTNS = path.join(REAL_DIR, "pool.wtns");
+const HONK_DIR = path.join(ROOT, "build", "integration_honk");
 const POOL_BUILD = path.join(ROOT, "build", "pool");
 const NOIR_AUTH_DIR = path.join(ROOT, "circuits-noir", "auth");
 
-fs.mkdirSync(REAL_DIR, { recursive: true });
+const MODE = (() => {
+  const flag = process.argv.find(a => a.startsWith("--mode="));
+  const v = flag ? flag.slice("--mode=".length) : "transfer";
+  if (!["transfer", "withdraw_eth", "withdraw_erc20"].includes(v)) {
+    throw new Error(`bad --mode: ${v}`);
+  }
+  return v;
+})();
+const POOL_INPUT = path.join(
+  HONK_DIR,
+  MODE === "transfer" ? "pool_input.json" : `${MODE}_pool_input.json`,
+);
+const POOL_WTNS = path.join(
+  HONK_DIR,
+  MODE === "transfer" ? "pool.wtns" : `${MODE}_pool.wtns`,
+);
+const SESSION_OUT = path.join(
+  HONK_DIR,
+  MODE === "transfer" ? "session.json" : `${MODE}_session.json`,
+);
+
+fs.mkdirSync(HONK_DIR, { recursive: true });
 
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { stdio: "inherit", cwd: opts.cwd || ROOT, ...opts });
@@ -59,15 +78,16 @@ function runQuiet(cmd, args, opts = {}) {
 }
 
 (async () => {
+  console.log(`==> mode: ${MODE}`);
   console.log("==> 1) prover.toml round 1 (locked bindings = 0)");
   run("node", ["scripts/noir/gen_prover_toml.js"]);
 
   console.log("==> 2) pool witness input round 1");
-  run("node", ["scripts/noir/gen_real_pool_witness_input.js"]);
+  run("node", ["scripts/noir/gen_honk_pool_witness_input.js", `--mode=${MODE}`]);
 
   console.log("==> 3) re-run prover.toml with the pool's computed locked bindings");
   const poolInput1 = JSON.parse(fs.readFileSync(POOL_INPUT, "utf8"));
-  const sharedIntentPath = path.join(REAL_DIR, "shared_for_auth.json");
+  const sharedIntentPath = path.join(HONK_DIR, "shared_for_auth.json");
   const sharedIntent = {
     private_key_hex: undefined, // use the gen script's default deterministic key
     auth_verifier_addr: poolInput1.authVerifier,
@@ -80,10 +100,14 @@ function runQuiet(cmd, args, opts = {}) {
     intent: {
       auth_verifier:               BigInt(poolInput1.authVerifier).toString(),
       authorizing_address:         BigInt(poolInput1.authorizingAddress).toString(),
-      operation_kind:              "0",                            // TRANSFER_OP
+      // Mirror the circuit's derivation: operationKind = 0 iff publicAmountOut == 0.
+      operation_kind:              BigInt(poolInput1.publicAmountOut) === 0n ? "0" : "1",
       token_address:               BigInt(poolInput1.tokenAddress).toString(),
       recipient_address:           BigInt(poolInput1.recipientAddress).toString(),
-      amount:                      BigInt(poolInput1.outAmount[0]).toString(),
+      // Transfer: amount = outAmount[0] (recipient note). Withdraw: amount = publicAmountOut.
+      amount:                      BigInt(poolInput1.publicAmountOut) === 0n
+                                     ? BigInt(poolInput1.outAmount[0]).toString()
+                                     : BigInt(poolInput1.publicAmountOut).toString(),
       fee_recipient_address:       BigInt(poolInput1.feeRecipientAddress).toString(),
       fee_amount:                  BigInt(poolInput1.feeAmount).toString(),
       execution_constraints_flags: BigInt(poolInput1.executionConstraintsFlags).toString(),
@@ -108,7 +132,7 @@ function runQuiet(cmd, args, opts = {}) {
   run("node", ["scripts/noir/gen_prover_toml.js", sharedIntentPath]);
 
   console.log("==> 4) regenerate pool witness with the same intent (nothing should change)");
-  run("node", ["scripts/noir/gen_real_pool_witness_input.js"]);
+  run("node", ["scripts/noir/gen_honk_pool_witness_input.js", `--mode=${MODE}`]);
 
   console.log("==> 5) pool witness binary + snarkjs prove");
   run("node", [
@@ -184,6 +208,7 @@ function runQuiet(cmd, args, opts = {}) {
     path.join(ROOT, "build/noir_auth/session_sidecar.json"), "utf8"));
 
   const session = {
+    mode: MODE,
     pool: {
       proofHex: "0x" + poolProofBytes.toString("hex"),
       publicSignals: poolPublics,
@@ -201,9 +226,8 @@ function runQuiet(cmd, args, opts = {}) {
       auth_prove_ms: tAuth,
     },
   };
-  const outPath = path.join(REAL_DIR, "session.json");
-  fs.writeFileSync(outPath, JSON.stringify(session, null, 2));
-  console.log("==> wrote", outPath);
+  fs.writeFileSync(SESSION_OUT, JSON.stringify(session, null, 2));
+  console.log("==> wrote", SESSION_OUT);
   console.log("    pool prove:", (tPool / 1000).toFixed(2), "s");
   console.log("    auth prove:", (tAuth / 1000).toFixed(2), "s");
   console.log("    wallet-side e2e:", ((tPool + tAuth) / 1000).toFixed(2),

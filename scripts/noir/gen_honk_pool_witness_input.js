@@ -1,5 +1,4 @@
-// Variant of scripts/witness/gen_pool_witness_input.js for the realistic
-// auth flow:
+// Variant of scripts/witness/gen_pool_witness_input.js for the Honk auth flow:
 //   - authorizingAddress is derived from a deterministic secp256k1 keypair
 //     (matches what the Noir auth circuit's pubkey-binding produces).
 //   - authVerifier is the address where RealAuthVerifier will be etched in
@@ -8,8 +7,17 @@
 //     (privacy_pool_common::crypto::secp256k1_auth_commitment from 71e7d72)
 //     instead of the demo's poseidon(POLICY_DOMAIN, authSecret).
 //
-// Output: build/integration_real/pool_input.json (kept distinct from the
-// demo flow's build/pool/input.json so neither overwrites the other).
+// Modes (--mode=, default transfer):
+//   - transfer:        publicAmountOut=0, slot 0 is recipient note,
+//                      slot 1 is sender's change, slot 2 is fee note.
+//   - withdraw_eth:    publicAmountOut>0, canonical tokenAddress=0,
+//                      publicTokenAddress=0; slot 0 = sender change,
+//                      slot 1 dummy, slot 2 fee.
+//   - withdraw_erc20:  publicAmountOut>0, canonical tokenAddress=token,
+//                      publicTokenAddress=token; slots same as withdraw_eth.
+//
+// Output: build/integration_honk/<mode>_pool_input.json (one per mode so
+// the three sessions don't overwrite each other).
 //
 // Witness shape MUST track circuits/pool/pool.circom — fields the circuit
 // derives (path bits, leaf-index bits, operationKind, output token slots) are
@@ -142,8 +150,23 @@ const senderRegLeaf = poseidon(
   senderNoteSecretSeedHash,
 );
 
+// ---- Mode (transfer | withdraw_eth | withdraw_erc20) ----
+const MODE = (() => {
+  const flag = process.argv.find(a => a.startsWith('--mode='));
+  const v = flag ? flag.slice('--mode='.length) : 'transfer';
+  if (!['transfer', 'withdraw_eth', 'withdraw_erc20'].includes(v)) {
+    throw new Error(`bad --mode: ${v}`);
+  }
+  return v;
+})();
+const IS_WITHDRAW = MODE !== 'transfer';
+
 // ---- Canonical token (single witness shared across real inputs/outputs) ----
-const tokenAddress = 0x2222222222222222222222222222222222222222n;
+//   transfer / withdraw_erc20: ERC-20 sentinel address.
+//   withdraw_eth:              0 (ETH).
+const tokenAddress = MODE === 'withdraw_eth'
+  ? 0n
+  : 0x2222222222222222222222222222222222222222n;
 
 // ---- Inputs (2 real notes, both spent, owned by sender) ----
 const inIsReal      = [1n, 1n];
@@ -167,23 +190,40 @@ const noteLeaves = new Map([
 const noteCommitmentRoot = noteCommitmentTreeRoot(noteLeaves, 32);
 const inSiblings = inLeafIndex.map(idx => noteCommitmentSiblings(Number(idx), noteLeaves, 32));
 
-// ---- Outputs (all 3 real) ----
-const outIsReal = [1n, 1n, 1n];
-const outAmount = [8n, 5n, 2n]; // 8+5+2 = 15 = 10+5 input total, publicAmountOut = 0
+// ---- Outputs ----
+//   transfer: all 3 real. amounts = [8, 5, 2]; sum=15 = inputs(10+5).
+//   withdraw: slot 1 dummy (circuit constraint), slot 0 = change to sender,
+//             slot 2 = fee. amounts = [5, 0, 2]; sum=7 + publicAmountOut(8) = 15.
+const outIsReal = IS_WITHDRAW ? [1n, 0n, 1n] : [1n, 1n, 1n];
+const outAmount = IS_WITHDRAW ? [5n, 0n, 2n] : [8n, 5n, 2n];
 
-const outRecipient = [
+// In withdraw, slot 0 is sender's change, slot 1 is dummy (must use 0xdead
+// owner-nullifier key per circuit constraint at pool.circom:286). Recipient
+// for dummy slot can be anything (membership gated by outIsReal[1]=0).
+const DUMMY_OWNER_NULLIFIER_KEY = 0xdeadn;
+const outRecipient = IS_WITHDRAW ? [
+  authorizingAddress,                          // change to sender (slot 0)
+  authorizingAddress,                          // dummy (slot 1) — uses sender's leaf so registry tree stays valid
+  0x4444444444444444444444444444444444444444n, // fee recipient (slot 2)
+] : [
   0x3333333333333333333333333333333333333333n, // payment recipient (transfer slot 0)
   authorizingAddress,                          // change to sender (slot 1)
   0x4444444444444444444444444444444444444444n, // fee recipient (slot 2)
 ];
-const outOwnerNullifierKey = [
-  0xBABE0001n,                  // recipient's key
-  senderOwnerNullifierKey,      // sender's own key for change
-  0xBABE0003n,                  // fee recipient's key
+const outOwnerNullifierKey = IS_WITHDRAW ? [
+  senderOwnerNullifierKey,         // sender's own key for change
+  DUMMY_OWNER_NULLIFIER_KEY,       // dummy: 0xdead per spec Section 3.2
+  0xBABE0003n,                     // fee recipient's key
+] : [
+  0xBABE0001n,                     // recipient's key
+  senderOwnerNullifierKey,         // sender's own key for change
+  0xBABE0003n,                     // fee recipient's key
 ];
 const outOwnerNullifierKeyHash = outOwnerNullifierKey.map(k =>
   poseidon(T.OWNER_NULLIFIER_KEY_HASH_DOMAIN, k));
-const outRecipientNoteSecretSeed = [0xC0DE01n, senderNoteSecretSeed, 0xC0DE03n];
+const outRecipientNoteSecretSeed = IS_WITHDRAW
+  ? [senderNoteSecretSeed, 0n, 0xC0DE03n]
+  : [0xC0DE01n,             senderNoteSecretSeed, 0xC0DE03n];
 const outRecipientNoteSecretSeedHash = outRecipientNoteSecretSeed.map(s =>
   poseidon(T.NOTE_SECRET_SEED_DOMAIN, s));
 
@@ -192,11 +232,29 @@ const outRecipientLeaf = outRecipient.map((u, i) =>
   poseidon(T.USER_REGISTRY_LEAF_DOMAIN, u, outOwnerNullifierKeyHash[i],
            outRecipientNoteSecretSeedHash[i]));
 
+// On-chain bench/test setup always registers SENDER + RECIPIENT0 + RECIPIENT2
+// to keep the registry invariant across modes. In withdraw mode, RECIPIENT0
+// is registered but never referenced as an output recipient — so we add its
+// entry explicitly so the witness's registry root matches the on-chain root.
+const RECIPIENT0_REGISTERED = {
+  key:  0x3333333333333333333333333333333333333333n,
+  onk:  0xBABE0001n,
+  seed: 0xC0DE01n,
+};
+const recipient0RegLeaf = poseidon(
+  T.USER_REGISTRY_LEAF_DOMAIN,
+  RECIPIENT0_REGISTERED.key,
+  poseidon(T.OWNER_NULLIFIER_KEY_HASH_DOMAIN, RECIPIENT0_REGISTERED.onk),
+  poseidon(T.NOTE_SECRET_SEED_DOMAIN,         RECIPIENT0_REGISTERED.seed),
+);
+
 const registryEntries = [
   { key: authorizingAddress, leaf: senderRegLeaf },
   { key: outRecipient[0],    leaf: outRecipientLeaf[0] },
   { key: outRecipient[1],    leaf: outRecipientLeaf[1] }, // sender's own — same key as sender
   { key: outRecipient[2],    leaf: outRecipientLeaf[2] },
+  // Withdraw mode: ensure 0x333 stays in the tree even though no slot uses it.
+  ...(IS_WITHDRAW ? [{ key: RECIPIENT0_REGISTERED.key, leaf: recipient0RegLeaf }] : []),
 ];
 const dedupedEntries = [];
 const seen = new Set();
@@ -212,9 +270,15 @@ const outRecipientSiblings = outRecipient.map(u => userRegBuilt.siblingsForKey(u
 // ---- Operation mode + intent fields ----
 //   operationKind is derived from publicAmountOut by the circuit; transfer
 //   here means publicAmountOut == 0.
-const recipientAddress      = outRecipient[0];
-const feeRecipientAddress   = outRecipient[2];
-const feeNoteRecipientAddress = outRecipient[2];   // matches feeRecipientAddress when feeRecipientAddress != 0
+//
+//   In withdraw mode, recipientAddress (the intent's "where do funds go")
+//   is the public destination, NOT slot 0's owner. feeRecipientAddress is
+//   independent of slot 0 in both modes.
+const recipientAddress      = IS_WITHDRAW
+  ? 0x3333333333333333333333333333333333333333n
+  : outRecipient[0];
+const feeRecipientAddress   = 0x4444444444444444444444444444444444444444n;
+const feeNoteRecipientAddress = feeRecipientAddress;
 const feeAmount             = outAmount[2];
 const nonce                 = 0x9F3A1C7E5B2D4F86n;
 const executionConstraintsFlags = 0n;
@@ -260,10 +324,13 @@ const outNoteSecret = [0,1,2].map(i =>
   poseidon(T.TRANSACT_NOTE_SECRET_DOMAIN, senderNoteSecretSeed, intentReplayId, BigInt(i)));
 const outOwnerCommitment = [0,1,2].map(i =>
   poseidon(T.OWNER_COMMITMENT_DOMAIN, outOwnerNullifierKeyHash[i], outNoteSecret[i]));
-// All 3 outputs are real, so the body's tokenAddress field == canonical token.
-// Dummy outputs would use 0 here (circuit: outBodyToken = outIsReal * tokenAddress).
-const outNoteBodyCommitment = [0,1,2].map(i =>
-  poseidon(T.NOTE_BODY_COMMITMENT_DOMAIN, outOwnerCommitment[i], outAmount[i], tokenAddress));
+// Circuit gates body's token field by realness:
+//   outBodyToken[i] = outIsReal[i] * tokenAddress   (dummy => 0)
+// JS must mirror or the locked-output-binding value won't match.
+const outNoteBodyCommitment = [0,1,2].map(i => {
+  const bodyToken = outIsReal[i] === 0n ? 0n : tokenAddress;
+  return poseidon(T.NOTE_BODY_COMMITMENT_DOMAIN, outOwnerCommitment[i], outAmount[i], bodyToken);
+});
 
 // ---- outputNoteData hashes + locked output bindings ----
 const OUTPUT_NOTE_DATA = ['eip-8182-output-0', 'eip-8182-output-1', 'eip-8182-output-2'];
@@ -281,18 +348,27 @@ const outLockedOutputBinding = [0,1,2].map(i =>
 // We override executionConstraintsFlags = 7 for the worst-case witness.
 const execFlagsWorstCase = 7n;
 
+// ---- Public values + intent digest amount ----
+//   Transfer:  publicAmountOut=0, publicTokenAddress=0, publicRecipientAddress=0,
+//              digest.amount == outAmount[0].
+//   Withdraw:  publicAmountOut>0, publicTokenAddress==canonical, publicRecipientAddress==recipientAddress,
+//              digest.amount == publicAmountOut, operationKind=1.
+const publicAmountOut         = IS_WITHDRAW ? 8n : 0n;
+const publicRecipientAddress  = IS_WITHDRAW ? recipientAddress : 0n;
+const publicTokenAddress      = IS_WITHDRAW ? tokenAddress : 0n;
+const operationKind           = IS_WITHDRAW ? 1n : 0n;
+const intentAmount            = IS_WITHDRAW ? publicAmountOut : outAmount[0];
+
 // ---- Blinded auth commitment + intent digest ----
-//   Transfer mode: digest's amount == outAmount[0] (recipient amount),
-//                  tokenAddress == canonical token, operationKind == 0.
 const blindedAuthCommitment = poseidon(T.BLINDED_AUTH_COMMITMENT_DOMAIN, authDataCommitment, blindingFactor);
 const transactionIntentDigest = poseidon(
   T.TRANSACTION_INTENT_DIGEST_DOMAIN,
   authVerifier,
   authorizingAddress,
-  0n,                               // operationKind = TRANSFER_OP
+  operationKind,
   tokenAddress,
   recipientAddress,
-  outAmount[0],                     // recipient amount
+  intentAmount,
   feeRecipientAddress,
   feeAmount,
   execFlagsWorstCase,
@@ -303,11 +379,6 @@ const transactionIntentDigest = poseidon(
   validUntilSeconds,
   executionChainId,
 );
-
-// ---- Public values ----
-const publicAmountOut         = 0n;     // transfer
-const publicRecipientAddress  = 0n;
-const publicTokenAddress      = 0n;
 
 // ---- Assemble input.json ----
 const toStr = v => (typeof v === 'bigint' ? v.toString() : String(v));
@@ -380,13 +451,18 @@ const out = {
   authRevSiblings:             arr(authRevSiblings),
 };
 
-const outPath = path.join(ROOT, 'build/integration_real/pool_input.json');
+// File name carries the mode so transfer/withdraw witnesses don't overwrite
+// each other when build_honk_session.js runs them sequentially. Keep the
+// legacy `pool_input.json` for transfer mode so existing tests / scripts
+// keep working without changes.
+const outName = MODE === 'transfer' ? 'pool_input.json' : `${MODE}_pool_input.json`;
+const outPath = path.join(ROOT, 'build/integration_honk', outName);
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, JSON.stringify(out, null, 2));
+console.log('mode:', MODE);
 console.log('wrote', outPath);
 console.log('  authorizingAddress       =', '0x' + authorizingAddress.toString(16).padStart(40, '0'));
 console.log('  authVerifier             =', '0x' + authVerifier.toString(16).padStart(40, '0'));
 console.log('  authDataCommitment       =', authDataCommitment.toString());
 console.log('  blindedAuthCommitment    =', blindedAuthCommitment.toString());
 console.log('  transactionIntentDigest  =', transactionIntentDigest.toString());
-console.log(`wrote ${outPath}`);
