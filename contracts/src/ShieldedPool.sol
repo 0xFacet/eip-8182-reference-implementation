@@ -414,6 +414,7 @@ contract ShieldedPool {
         uint256 transactionIntentDigest,
         bytes calldata proof
     ) private view {
+        require(verifier.code.length != 0, AuthVerifierMissing());
         bytes memory pubInputs = abi.encode(blindedAuthCommitment, transactionIntentDigest);
         (bool success, bytes memory ret) = verifier.staticcall(
             abi.encodeCall(IAuthVerifier.verifyAuth, (pubInputs, proof))

@@ -30,12 +30,16 @@ if (argPath) {
 } else {
   // Defaults match scripts/witness/gen_pool_witness_input.js so both
   // proofs share identical blindedAuthCommitment + transactionIntentDigest.
+  // operationKind=0 is TRANSFER_OP per spec Section 3.2 (was 1 pre-fix).
+  // The locked bindings here are the pool witness's worst-case values
+  // (computed in the pool witness gen); the shared-intent path overrides
+  // these with real values from the pool input.
   const authVerifier             = 0xA1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1n;
   const authorizingAddress       = 0x1111111111111111111111111111111111111111n;
-  const operationKind            = 1n; // TRANSFER_OP
+  const operationKind            = 0n; // TRANSFER_OP per spec Section 3.2
   const tokenAddress             = 0x2222222222222222222222222222222222222222n;
   const recipientAddress         = 0x3333333333333333333333333333333333333333n;
-  const amount                   = 8n;
+  const amount                   = 8n; // outAmount[0] = recipient amount
   const feeRecipientAddress      = 0x4444444444444444444444444444444444444444n;
   const feeAmount                = 2n;
   const executionConstraintsFlags= 0n;

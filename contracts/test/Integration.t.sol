@@ -248,6 +248,389 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         assertEq(address(pool).balance, 1 ether);
     }
 
+    // ----------------------- Layer 2: negative tests -------------------------
+
+    /// @dev Etches the always-accept pool precompile, registers a sender, and
+    ///      deploys an always-accept auth verifier. Returns a fully populated
+    ///      `PublicInputs` struct that — as-is — would make `transact` succeed
+    ///      with mock verifiers. Tests then mutate one field to exercise a
+    ///      single negative path.
+    function _setupForTransact()
+        internal
+        returns (
+            ShieldedPool.PublicInputs memory pi,
+            AcceptAllAuthVerifier acceptAuth
+        )
+    {
+        AcceptAllPoolPrecompile alwaysAcceptPool = new AcceptAllPoolPrecompile();
+        vm.etch(PROOF_VERIFY_PRECOMPILE_ADDRESS, address(alwaysAcceptPool).code);
+        acceptAuth = new AcceptAllAuthVerifier();
+
+        address sender = address(0x1234);
+        uint256 senderOnk = uint256(keccak256("sender onk")) % PoseidonFieldLib.FIELD_MODULUS;
+        uint256 senderSeed = uint256(keccak256("sender seed")) % PoseidonFieldLib.FIELD_MODULUS;
+        vm.prank(sender);
+        pool.registerUser(senderOnk, senderSeed);
+        vm.prank(sender);
+        pool.registerAuthPolicy(uint256(keccak256("policy")) % PoseidonFieldLib.FIELD_MODULUS);
+
+        pi = _basePI(address(acceptAuth));
+    }
+
+    function _basePI(address authVerifierAddr)
+        internal
+        view
+        returns (ShieldedPool.PublicInputs memory pi)
+    {
+        (
+            uint256 noteRoot,
+            uint256 userRoot,
+            uint256 authRegRoot,
+            uint256 authRevRoot
+        ) = pool.getCurrentRoots();
+        pi = ShieldedPool.PublicInputs({
+            noteCommitmentRoot: noteRoot,
+            nullifier0: 0x111,
+            nullifier1: 0x222,
+            noteBodyCommitment0: 0xb1,
+            noteBodyCommitment1: 0xb2,
+            noteBodyCommitment2: 0xb3,
+            publicAmountOut: 0,
+            publicRecipientAddress: 0,
+            publicTokenAddress: 0,
+            intentReplayId: 0xdeadbeef,
+            registryRoot: userRoot,
+            validUntilSeconds: uint256(block.timestamp + 600),
+            executionChainId: block.chainid,
+            authPolicyRegistrationRoot: authRegRoot,
+            authPolicyRevocationRoot: authRevRoot,
+            outputNoteDataHash0: uint256(keccak256("o0")) % PoseidonFieldLib.FIELD_MODULUS,
+            outputNoteDataHash1: uint256(keccak256("o1")) % PoseidonFieldLib.FIELD_MODULUS,
+            outputNoteDataHash2: uint256(keccak256("o2")) % PoseidonFieldLib.FIELD_MODULUS,
+            authVerifier: uint256(uint160(authVerifierAddr)),
+            blindedAuthCommitment: 0xc0ffee,
+            transactionIntentDigest: 0xb16b00b5
+        });
+    }
+
+    function testTransactRevertsWhenAuthVerifierHasNoCode() public {
+        // Use a fresh address with no bytecode as the registered authVerifier.
+        // Range and zero checks pass (it's a non-zero <2^160 address); the new
+        // code-length guard inside _verifyAuthProof must fire.
+        address noCodeVerifier = address(0xC0dE0000c0De0000C0DE0000c0De0000c0DE0000);
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.authVerifier = uint256(uint160(noCodeVerifier));
+
+        vm.expectRevert(ShieldedPool.AuthVerifierMissing.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsAmountOutOfRange() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.publicAmountOut = uint256(1) << 248;
+
+        vm.expectRevert(ShieldedPool.AmountOutOfRange.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsAddressOutOfRangeRecipient() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.publicRecipientAddress = uint256(1) << 160;
+
+        vm.expectRevert(ShieldedPool.AddressOutOfRange.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsAddressOutOfRangeToken() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.publicTokenAddress = uint256(1) << 160;
+
+        vm.expectRevert(ShieldedPool.AddressOutOfRange.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsAddressOutOfRangeAuthVerifier() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.authVerifier = uint256(1) << 160;
+
+        vm.expectRevert(ShieldedPool.AddressOutOfRange.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsAuthVerifierZero() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.authVerifier = 0;
+
+        vm.expectRevert(ShieldedPool.AuthVerifierMissing.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsIntentExpiredZero() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.validUntilSeconds = 0;
+
+        vm.expectRevert(ShieldedPool.IntentExpired.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsIntentExpiredPast() public {
+        // Push timestamp forward so we have a "past" value.
+        vm.warp(1000);
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.validUntilSeconds = block.timestamp - 1;
+
+        vm.expectRevert(ShieldedPool.IntentExpired.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsIntentExpiredAtUint32Boundary() public {
+        // Spec says `validUntilSeconds < 2^32`; contract uses
+        // `<= type(uint32).max` (== 2^32 - 1). So 2^32 must revert.
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.validUntilSeconds = uint256(1) << 32;
+
+        vm.expectRevert(ShieldedPool.IntentExpired.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsIntentLifetimeTooLong() public {
+        vm.warp(1000);
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.validUntilSeconds = block.timestamp + 86400 + 1;
+
+        vm.expectRevert(ShieldedPool.IntentLifetimeTooLong.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsWrongChainId() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.executionChainId = block.chainid + 1;
+
+        vm.expectRevert(ShieldedPool.WrongChainId.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsDuplicateNullifier() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.nullifier1 = pi.nullifier0;
+
+        vm.expectRevert(ShieldedPool.DuplicateNullifier.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsIntentReplayIdAlreadyUsed() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        // First call succeeds.
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+
+        // Reuse the same intentReplayId; rotate other fields so we don't trip
+        // a different revert first (nullifiers are also single-use).
+        pi.nullifier0 = 0x333;
+        pi.nullifier1 = 0x444;
+
+        vm.expectRevert(ShieldedPool.IntentReplayIdAlreadyUsed.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsInvalidOutputNoteDataHash() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        // Mismatched payload for slot 0: hash says "o0" but bytes say "OOPS".
+        vm.expectRevert(
+            abi.encodeWithSelector(ShieldedPool.InvalidOutputNoteDataHash.selector, uint8(0))
+        );
+        pool.transact(new bytes(256), new bytes(256), pi, "OOPS", "o1", "o2");
+    }
+
+    function testTransactRevertsUnknownNoteCommitmentRoot() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.noteCommitmentRoot = uint256(keccak256("not in history"))
+            % PoseidonFieldLib.FIELD_MODULUS;
+
+        vm.expectRevert(ShieldedPool.UnknownNoteCommitmentRoot.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsZeroRegistryRoot() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.registryRoot = 0;
+
+        vm.expectRevert(ShieldedPool.ZeroRegistryRoot.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsUnknownUserRegistryRoot() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.registryRoot = uint256(keccak256("not in history"))
+            % PoseidonFieldLib.FIELD_MODULUS;
+
+        vm.expectRevert(ShieldedPool.UnknownUserRegistryRoot.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsZeroAuthPolicyRegistrationRoot() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.authPolicyRegistrationRoot = 0;
+
+        vm.expectRevert(ShieldedPool.ZeroRegistrationRoot.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsUnknownAuthPolicyRegistrationRoot() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.authPolicyRegistrationRoot = uint256(keccak256("not in history"))
+            % PoseidonFieldLib.FIELD_MODULUS;
+
+        vm.expectRevert(ShieldedPool.UnknownAuthPolicyRegistrationRoot.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsZeroAuthPolicyRevocationRoot() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.authPolicyRevocationRoot = 0;
+
+        vm.expectRevert(ShieldedPool.ZeroRevocationRoot.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsUnknownAuthPolicyRevocationRoot() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.authPolicyRevocationRoot = uint256(keccak256("not in history"))
+            % PoseidonFieldLib.FIELD_MODULUS;
+
+        vm.expectRevert(ShieldedPool.UnknownAuthPolicyRevocationRoot.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testRegisterUserRevertsOnDuplicateOwnerNullifierKeyHash() public {
+        address userA = address(0xA1);
+        address userB = address(0xB2);
+        uint256 dup = 0xCAFE;
+        vm.prank(userA);
+        pool.registerUser(dup, 0x1234);
+
+        vm.prank(userB);
+        vm.expectRevert(ShieldedPool.OwnerNullifierKeyHashAlreadyUsed.selector);
+        pool.registerUser(dup, 0x5678);
+    }
+
+    function testRegisterUserRevertsOnReservedZeroOwnerNullifierKeyHash() public {
+        vm.expectRevert(ShieldedPool.ReservedOwnerNullifierKeyHash.selector);
+        pool.registerUser(0, 0x1234);
+    }
+
+    function testRegisterUserRevertsOnReservedDummyOwnerNullifierKeyHash() public {
+        uint256 dummy = PoseidonFieldLib.dummyOwnerNullifierKeyHash();
+        vm.expectRevert(ShieldedPool.ReservedOwnerNullifierKeyHash.selector);
+        pool.registerUser(dummy, 0x1234);
+    }
+
+    function testRegisterUserRevertsOnNonCanonicalFieldElement() public {
+        vm.expectRevert(ShieldedPool.FieldElementNotCanonical.selector);
+        pool.registerUser(PoseidonFieldLib.FIELD_MODULUS, 0x1234);
+    }
+
+    function testRegisterUserRevertsOnSecondRegistrationFromSameAddress() public {
+        address user = address(0xABCD);
+        vm.prank(user);
+        pool.registerUser(0x1111, 0x2222);
+        vm.prank(user);
+        vm.expectRevert(ShieldedPool.UserAlreadyRegistered.selector);
+        pool.registerUser(0x3333, 0x4444);
+    }
+
+    function testRegisterAuthPolicyRevertsOnZeroPolicyCommitment() public {
+        address user = address(0xABCD);
+        vm.prank(user);
+        pool.registerUser(0x1111, 0x2222);
+
+        vm.prank(user);
+        vm.expectRevert(ShieldedPool.InvalidPolicyCommitment.selector);
+        pool.registerAuthPolicy(0);
+    }
+
+    function testRegisterAuthPolicyRevertsOnNonCanonicalFieldElement() public {
+        address user = address(0xABCD);
+        vm.prank(user);
+        pool.registerUser(0x1111, 0x2222);
+
+        vm.prank(user);
+        vm.expectRevert(ShieldedPool.FieldElementNotCanonical.selector);
+        pool.registerAuthPolicy(PoseidonFieldLib.FIELD_MODULUS);
+    }
+
+    function testRegisterAuthPolicyRevertsWhenCallerNotRegistered() public {
+        address user = address(0xABCD);
+        vm.prank(user);
+        vm.expectRevert(ShieldedPool.UserNotRegistered.selector);
+        pool.registerAuthPolicy(0x1234);
+    }
+
+    function testDeregisterAuthPolicyRevertsOnLeafPositionOutOfRange() public {
+        address user = address(0xABCD);
+        vm.prank(user);
+        pool.registerUser(0x1111, 0x2222);
+
+        vm.prank(user);
+        vm.expectRevert(ShieldedPool.LeafPositionOutOfRange.selector);
+        pool.deregisterAuthPolicy(uint256(1) << 32);
+    }
+
+    function testDeregisterAuthPolicyRevertsOnDoubleRevoke() public {
+        address user = address(0xABCD);
+        vm.prank(user);
+        pool.registerUser(0x1111, 0x2222);
+        vm.prank(user);
+        uint256 leafPos = pool.registerAuthPolicy(0xa3);
+
+        vm.prank(user);
+        pool.deregisterAuthPolicy(leafPos);
+
+        vm.prank(user);
+        vm.expectRevert(ShieldedPool.AuthPolicyAlreadyRevoked.selector);
+        pool.deregisterAuthPolicy(leafPos);
+    }
+
+    function testDepositRevertsOnEthAmountMismatch() public {
+        uint256 ownerCommitment = uint256(keccak256("oc")) % PoseidonFieldLib.FIELD_MODULUS;
+        vm.deal(address(this), 2 ether);
+        vm.expectRevert(ShieldedPool.EthAmountMismatch.selector);
+        pool.deposit{value: 0.5 ether}(address(0), 1 ether, ownerCommitment, "delivery");
+    }
+
+    function testDepositRevertsOnZeroAmount() public {
+        uint256 ownerCommitment = uint256(keccak256("oc")) % PoseidonFieldLib.FIELD_MODULUS;
+        vm.expectRevert(ShieldedPool.InvalidDepositAmount.selector);
+        pool.deposit(address(0), 0, ownerCommitment, "delivery");
+    }
+
+    function testMockPoolPrecompileReturnsZeroOnGarbageCalldata() public {
+        PoolGroth16Verifier g16 = new PoolGroth16Verifier();
+        MockPoolPrecompile mock = new MockPoolPrecompile(g16);
+
+        (bool ok, bytes memory ret) = address(mock).call(hex"deadbeef");
+        assertTrue(ok, "precompile MUST NOT revert on garbage calldata");
+        assertEq(ret.length, 32, "precompile must return 32 bytes");
+        assertEq(abi.decode(ret, (uint256)), 0, "garbage calldata must return 0");
+    }
+
+    function testTransactRevertsOnAuthVerifierShortReturn() public {
+        BadReturnAuthVerifier badVerifier = new BadReturnAuthVerifier();
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.authVerifier = uint256(uint160(address(badVerifier)));
+
+        vm.expectRevert(ShieldedPool.AuthProofRejected.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsOnAuthVerifierReturningFalse() public {
+        RejectAllAuthVerifier rejectVerifier = new RejectAllAuthVerifier();
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.authVerifier = uint256(uint160(address(rejectVerifier)));
+
+        vm.expectRevert(ShieldedPool.AuthProofRejected.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
     // ----------------------------- Helpers -----------------------------------
 
     function _readPublicInputs() private view returns (ShieldedPool.PublicInputs memory pi) {
@@ -293,5 +676,28 @@ contract AcceptAllAuthVerifier is IAuthVerifier {
 contract AcceptAllPoolPrecompile {
     fallback(bytes calldata) external returns (bytes memory) {
         return abi.encode(uint256(1));
+    }
+}
+
+/// @notice Auth verifier that returns `false`. Used to confirm `transact`
+///         maps a negative auth result to `AuthProofRejected`.
+contract RejectAllAuthVerifier is IAuthVerifier {
+    function verifyAuth(bytes calldata, bytes calldata) external pure override returns (bool) {
+        return false;
+    }
+}
+
+/// @notice Auth verifier whose `verifyAuth` returns exactly 16 bytes via raw
+///         RETURN, breaking the IAuthVerifier ABI shape.
+///         `_verifyAuthProof` MUST reject any non-32-byte return.
+contract BadReturnAuthVerifier {
+    function verifyAuth(bytes calldata, bytes calldata) external pure returns (bool) {
+        // Force a 16-byte raw return regardless of the declared bool return.
+        // ABI-encoded `bool true` would be 32 bytes; this short return must
+        // be rejected by the system contract's `ret.length == 32` guard.
+        assembly {
+            mstore(0x00, 0x0000000000000000000000000000000100000000000000000000000000000000)
+            return(0x00, 16)
+        }
     }
 }

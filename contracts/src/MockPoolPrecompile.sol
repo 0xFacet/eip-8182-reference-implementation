@@ -49,7 +49,19 @@ contract MockPoolPrecompile {
     ///         calldata is the raw `abi.encode(proof, publicInputs)`, output is
     ///         a 32-byte word, and the function MUST NOT revert.
     fallback(bytes calldata input) external returns (bytes memory) {
-        return abi.encode(_verify(input));
+        try this.verifyExternal(input) returns (uint256 r) {
+            return abi.encode(r);
+        } catch {
+            return abi.encode(uint256(0));
+        }
+    }
+
+    /// @notice External self-call shim so `_verify`'s `abi.decode` can be
+    ///         wrapped in a try/catch. Spec §5.5 requires the precompile MUST
+    ///         NOT revert; without this, malformed ABI input would propagate
+    ///         a revert from `abi.decode`.
+    function verifyExternal(bytes calldata input) external view returns (uint256) {
+        return _verify(input);
     }
 
     function _verify(bytes calldata input) private view returns (uint256) {

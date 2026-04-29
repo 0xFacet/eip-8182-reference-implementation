@@ -40,13 +40,22 @@ function run(cmd, args, opts = {}) {
   // values — both proofs MUST produce the same blindedAuthCommitment and
   // transactionIntentDigest for the integration test to wire them together.
   const poolInput = JSON.parse(fs.readFileSync(path.join(POOL_DIR, "input.json"), "utf8"));
+  // The pool circuit derives operationKind from publicAmountOut, so it's not
+  // present in poolInput; we recompute it here for the auth witness, which
+  // takes operationKind as a private witness.
+  const operationKind = BigInt(poolInput.publicAmountOut) === 0n ? "0" : "1";
+  // Transfer mode: digest amount == outAmount[0] (recipient amount).
+  // Withdrawal mode: digest amount == publicAmountOut.
+  const intentAmount = operationKind === "0"
+    ? poolInput.outAmount[0]
+    : poolInput.publicAmountOut;
   const sharedIntent = {
     authVerifier:               poolInput.authVerifier,
     authorizingAddress:         poolInput.authorizingAddress,
-    operationKind:              poolInput.operationKind,
-    tokenAddress:               poolInput.inTokenAddress[0],
+    operationKind,
+    tokenAddress:               poolInput.tokenAddress,
     recipientAddress:           poolInput.recipientAddress,
-    amount:                     poolInput.inAmount[0],
+    amount:                     intentAmount,
     feeRecipientAddress:        poolInput.feeRecipientAddress,
     feeAmount:                  poolInput.feeAmount,
     executionConstraintsFlags:  poolInput.executionConstraintsFlags,

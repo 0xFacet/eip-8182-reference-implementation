@@ -25,3 +25,16 @@ template RangeCheck(N) {
     component d = Num2Bits(N);
     d.in <== in;
 }
+
+// Standard "is the input zero" gadget: out == 1 iff in == 0, else out == 0.
+// Uses one witness signal `inv` for the in-circuit inverse, then constrains
+// (out = 1 - in*inv) and (in*out = 0). Together these force the right value
+// for `out` regardless of how `inv` was witnessed.
+template IsZero() {
+    signal input  in;
+    signal output out;
+    signal inv;
+    inv <-- in != 0 ? 1 / in : 0;
+    out <== 1 - in * inv;
+    in * out === 0;
+}

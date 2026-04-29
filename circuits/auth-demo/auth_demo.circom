@@ -66,6 +66,12 @@ template AuthDemo() {
     signal input authSecret;
     signal input blindingFactor;
 
+    // Sanity: operationKind MUST be 0 (TRANSFER_OP) or 1 (WITHDRAWAL_OP) per
+    // spec Section 3.2. The pool circuit derives this same value from
+    // publicAmountOut, so digest mismatch is the real soundness fence — this
+    // boolean check just rejects malformed witnesses up-front.
+    operationKind * (1 - operationKind) === 0;
+
     // ===== Step 1: derive authDataCommitment from the credential =====
     // poseidon(POLICY_COMMITMENT_DOMAIN, authSecret)
     component authDataHash = Poseidon2Sponge(2);

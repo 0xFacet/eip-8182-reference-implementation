@@ -93,7 +93,54 @@ forge test                                  # 10/10 should pass
 - Full `transact` flow against mock verifiers — confirms tree updates, root histories, nullifier marking, intent-replay-id consumption, and event emission.
 - `registerUser`, `registerAuthPolicy`, `deregisterAuthPolicy` (with cross-user revocation rejected), and `deposit` advance their respective trees.
 
-Pool prove: ~5 s WASM (`snarkjs groth16 prove`), 0.45 s native (`rapidsnark` from the iden3 v0.0.8 release). Auth-demo prove: ~0.1 s.
+### Pool proving benchmark
+
+This is a pool-proof-only benchmark. It does not include auth proving, wallet note scanning, note encryption/decryption, RPC, transaction submission, or block inclusion.
+
+The current pool circuit has 223,043 constraints, 21 public inputs, and 808 private inputs. The benchmark witness is the worst-case private-transfer shape for this circuit: two real input notes, three real output notes, private fee output active, and all three output slots locked.
+
+The `build_session.js` timing uses `snarkjs.groth16.prove` under Node:
+
+```bash
+node scripts/integration/build_session.js
+```
+
+Observed Node/snarkjs result on April 29, 2026:
+
+```text
+pool proved in 4.098s
+local verify OK
+```
+
+To measure the same pool proof with a native `rapidsnark` prover:
+
+```bash
+/usr/bin/time -p "$RAPIDSNARK_PROVER" \
+  build/pool/pool_final.zkey \
+  build/pool/witness.wtns \
+  pool-proof.rapidsnark.json \
+  pool-public.rapidsnark.json
+
+npx snarkjs groth16 verify \
+  build/pool/pool_vkey.json \
+  pool-public.rapidsnark.json \
+  pool-proof.rapidsnark.json
+```
+
+Observed native result on April 29, 2026:
+
+```text
+Machine: MacBook Pro, Apple M5 Max, 18 CPU cores, 128 GB RAM, macOS 26.4
+Prover:  iden3 rapidsnark v0.0.8, macOS arm64 release
+
+real 0.68
+user 4.95
+sys  0.43
+
+snarkJS: OK!
+```
+
+These numbers are local reference measurements, not protocol guarantees or wallet performance targets. The demo auth proof is intentionally cheap and does not measure a production ECDSA/EIP-712 auth circuit.
 
 ## What's normative vs reference
 

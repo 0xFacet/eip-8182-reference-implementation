@@ -13,8 +13,9 @@ cd "$ROOT"
 CIRCOM="${CIRCOM:-$ROOT/vendor/circom}"
 SNARKJS="$ROOT/node_modules/.bin/snarkjs"
 OUT="$ROOT/build/pool"
-PTAU_BUCKET="https://hermez.s3-eu-west-1.amazonaws.com/powersOfTau28_hez_final_19.ptau"
+PTAU_BUCKET="https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_19.ptau"
 PTAU_FILE="$ROOT/build/pot19.ptau"
+VERIFIER_OUT="$ROOT/contracts/src/PoolGroth16Verifier.sol"
 
 mkdir -p "$OUT"
 
@@ -53,6 +54,13 @@ echo "==> export verification key"
 echo "==> writing canonical pool_vk.bin"
 node "$ROOT/scripts/assets/vk_to_bin.js" "$OUT/pool_vkey.json" "$OUT/pool_vk.bin"
 shasum -a 256 "$OUT/pool_vk.bin" | awk '{print $1}' > "$OUT/pool_vk.sha256"
+
+# 6. Export Solidity verifier and rename the snarkjs default symbol so
+# MockPoolPrecompile's import resolves.
+echo "==> export Solidity verifier"
+"$SNARKJS" zkey export solidityverifier "$OUT/pool_final.zkey" "$VERIFIER_OUT"
+sed -i.bak 's/^contract Groth16Verifier {/contract PoolGroth16Verifier {/' "$VERIFIER_OUT"
+rm -f "$VERIFIER_OUT.bak"
 
 echo
 echo "build done: $OUT"
