@@ -1,0 +1,23 @@
+{
+  "name": "keccak256",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/oracle_server.js"
+  },
+  "dependencies": {
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "keccak": "^3.0.4"
+  },
+  "devDependencies": {
+    "@types/body-parser": "^1.19.5",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/keccak": "^3.0.5",
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.3"
+  }
+}
