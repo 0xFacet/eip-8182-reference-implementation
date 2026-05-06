@@ -149,6 +149,17 @@ function runQuiet(cmd, args, opts = {}) {
   const tPool = Date.now() - t0;
   console.log(`    pool proved in ${(tPool / 1000).toFixed(2)}s`);
 
+  // Emit proof.json + public.json adjacent to the wtns; scripts/assets/refresh.sh
+  // reads these. Mirrors `snarkjs groth16 prove --proof ... --public ...` CLI.
+  fs.writeFileSync(
+    path.join(POOL_BUILD, "proof.json"),
+    JSON.stringify(poolProof, null, 2),
+  );
+  fs.writeFileSync(
+    path.join(POOL_BUILD, "public.json"),
+    JSON.stringify(poolPublics, null, 2),
+  );
+
   console.log("==> 6) auth witness + bb prove");
   run("nargo", ["execute", "auth"], { cwd: NOIR_AUTH_DIR });
   // Need a VK for prove; regenerate to be safe (cheap).

@@ -183,12 +183,35 @@ const inNoteCommitment = inAmount.map((_, i) =>
 const inRealNullifier = inAmount.map((_, i) =>
   poseidon(T.NULLIFIER_DOMAIN, inNoteCommitment[i], senderOwnerNullifierKey));
 
-const noteLeaves = new Map([
+// Mirror the on-chain two-deposit setup: input 0 was deposited first
+// (post-deposit-1 root R1, accumulator leaf 0); input 1 was deposited next
+// (post-deposit-2 root R2, accumulator leaf 1). Each input gets its own
+// per-slot noteRoot + rootLogIndex, exercising the spec's per-slot
+// independence.
+const noteLeavesAfterDeposit1 = new Map([
+  [Number(inLeafIndex[0]), inNoteCommitment[0]],
+]);
+const noteLeavesAfterDeposit2 = new Map([
   [Number(inLeafIndex[0]), inNoteCommitment[0]],
   [Number(inLeafIndex[1]), inNoteCommitment[1]],
 ]);
-const noteCommitmentRoot = noteCommitmentTreeRoot(noteLeaves, 32);
-const inSiblings = inLeafIndex.map(idx => noteCommitmentSiblings(Number(idx), noteLeaves, 32));
+const noteRootAfterDeposit1 = noteCommitmentTreeRoot(noteLeavesAfterDeposit1, 32);
+const noteRootAfterDeposit2 = noteCommitmentTreeRoot(noteLeavesAfterDeposit2, 32);
+
+const inNoteRoot = [noteRootAfterDeposit1, noteRootAfterDeposit2];
+const inRootLogIndex = [0n, 1n];
+const inSiblings = [
+  noteCommitmentSiblings(Number(inLeafIndex[0]), noteLeavesAfterDeposit1, 32),
+  noteCommitmentSiblings(Number(inLeafIndex[1]), noteLeavesAfterDeposit2, 32),
+];
+
+const histLeaves = new Map(inNoteRoot.map((nr, i) => [
+  Number(inRootLogIndex[i]),
+  poseidon(T.HISTORICAL_NOTE_ROOT_LEAF_DOMAIN, nr, inRootLogIndex[i]),
+]));
+const historicalNoteRootAccumulatorRoot = noteCommitmentTreeRoot(histLeaves, 32);
+const inHistRootSiblings = inRootLogIndex.map(idx =>
+  noteCommitmentSiblings(Number(idx), histLeaves, 32));
 
 // ---- Outputs ----
 //   transfer: all 3 real. amounts = [8, 5, 2]; sum=15 = inputs(10+5).
@@ -387,7 +410,7 @@ const arr2  = a => a.map(arr);
 
 const out = {
   // public (21)
-  noteCommitmentRoot:          toStr(noteCommitmentRoot),
+  historicalNoteRootAccumulatorRoot: toStr(historicalNoteRootAccumulatorRoot),
   nullifier0:                  toStr(inRealNullifier[0]),
   nullifier1:                  toStr(inRealNullifier[1]),
   noteBodyCommitment0:         toStr(outNoteBodyCommitment[0]),
@@ -421,6 +444,11 @@ const out = {
   inNoteSecret:                arr(inNoteSecret),
   inLeafIndex:                 arr(inLeafIndex),
   inSiblings:                  arr2(inSiblings),
+
+  // private — historical note-root accumulator membership (per real input)
+  inNoteRoot:                  arr(inNoteRoot),
+  inRootLogIndex:              arr(inRootLogIndex),
+  inHistRootSiblings:          arr2(inHistRootSiblings),
 
   // private — outputs
   outIsReal:                   arr(outIsReal),

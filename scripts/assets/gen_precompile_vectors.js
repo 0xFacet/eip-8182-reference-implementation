@@ -113,7 +113,7 @@ async function verifyOK(p, pubs) {
       proof: "0x" + proofBytes.toString("hex"),
       publicInputs: publicsBig.map((b) => "0x" + b.toString(16).padStart(64, "0")),
       publicInputsLabels: [
-        "noteCommitmentRoot",
+        "historicalNoteRootAccumulatorRoot",
         "nullifier0",
         "nullifier1",
         "noteBodyCommitment0",
@@ -176,14 +176,15 @@ async function verifyOK(p, pubs) {
   );
 
   // ----- Vector 3: non-canonical public input -----
-  // Set publicInputs[0] (noteCommitmentRoot) to exactly p (BN254 scalar field
-  // order). Section 3.5 forbids public inputs >= p; the precompile MUST reject.
+  // Set publicInputs[0] (historicalNoteRootAccumulatorRoot) to exactly p
+  // (BN254 scalar field order). Section 3.5 forbids public inputs >= p; the
+  // precompile MUST reject.
   const ncPublics = [...publicsBig];
   ncPublics[0] = BN254_FR;
   const ncInput = encodeInput(proofBytes, ncPublics);
   const ncVec = {
     description:
-      "publicInputs[0] (noteCommitmentRoot) set to p (BN254 scalar field order). The precompile MUST reject any public input >= p (Section 3.5) and return uint256(0).",
+      "publicInputs[0] (historicalNoteRootAccumulatorRoot) set to p (BN254 scalar field order). The precompile MUST reject any public input >= p (Section 3.5) and return uint256(0).",
     mutation: "publicInputs[0] := p_bn254_fr",
     input: ncInput,
     expectedOutput:

@@ -170,6 +170,18 @@ template BlindedAuthCommitment() {
     out <== s.out;
 }
 
+// poseidon(HISTORICAL_NOTE_ROOT_LEAF_DOMAIN, noteRoot, rootLogIndex)
+template HistoricalNoteRootLeaf() {
+    signal input  noteRoot;
+    signal input  rootLogIndex;
+    signal output out;
+    component s = Poseidon2Sponge(3);
+    s.in[0] <== HISTORICAL_NOTE_ROOT_LEAF_DOMAIN();
+    s.in[1] <== noteRoot;
+    s.in[2] <== rootLogIndex;
+    out <== s.out;
+}
+
 // poseidon(USER_REGISTRY_LEAF_DOMAIN, user, ownerNullifierKeyHash, noteSecretSeedHash)
 template UserRegistryLeaf() {
     signal input  user;

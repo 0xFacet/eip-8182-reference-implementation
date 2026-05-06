@@ -7,7 +7,7 @@ const { poseidon } = require("./poseidon2");
 const T = require("./domain_tags");
 
 const PUBLIC_INPUT_FIELDS = [
-  "noteCommitmentRoot",
+  "historicalNoteRootAccumulatorRoot",
   "nullifier0",
   "nullifier1",
   "noteBodyCommitment0",

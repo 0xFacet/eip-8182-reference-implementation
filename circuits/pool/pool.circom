@@ -23,7 +23,7 @@ include "bits.circom";
 
 template Pool() {
     // ===== Public inputs (21 fields, Section 10 declaration order) =====
-    signal input noteCommitmentRoot;
+    signal input historicalNoteRootAccumulatorRoot;
     signal input nullifier0;
     signal input nullifier1;
     signal input noteBodyCommitment0;
@@ -58,6 +58,15 @@ template Pool() {
     signal input inNoteSecret[2];
     signal input inLeafIndex[2];                       // <2^32
     signal input inSiblings[2][32];                    // path bits derived from inLeafIndex
+
+    // Per-input historical-root-accumulator witnesses (Section: EIP-8182
+    // historical note-root accumulator). Each real input proves the note's
+    // membership in a private noteRoot, then proves that noteRoot is a leaf
+    // at rootLogIndex of the public accumulator. Phantom slots (inIsReal == 0)
+    // gate both checks and may carry placeholders.
+    signal input inNoteRoot[2];                        // private per-input post-creation note root
+    signal input inRootLogIndex[2];                    // <2^32; accumulator leaf index for inNoteRoot[i]
+    signal input inHistRootSiblings[2][32];            // depth-32 accumulator siblings
 
     // Outputs: 3 slots, each real (1) or dummy (0); slot 2 is fee slot when real
     signal input outIsReal[3];                         // bool
@@ -185,14 +194,18 @@ template Pool() {
 
     // ===== Inputs: per-slot derivation =====
     // For each input, derive owner / body / final commitment / nullifier, check
-    // Merkle path against noteCommitmentRoot for real inputs, and select
-    // between real and phantom nullifier by isReal.
+    // Merkle path against a private per-slot inNoteRoot[i] for real inputs, then
+    // prove inNoteRoot[i] is a leaf of the public accumulator at inRootLogIndex[i],
+    // and select between real and phantom nullifier by isReal.
     component inOC[2];
     component inBC[2];
     component inNC[2];
     component inNF[2];
     component inPN[2];
     component inPath[2];
+    component nbInRootIdx[2];
+    component histLeaf[2];
+    component histPath[2];
     signal    inEffectiveNullifier[2];
 
     for (var i = 0; i < 2; i++) {
@@ -222,14 +235,32 @@ template Pool() {
         inPN[i].inputIndex        <== i;
 
         // Merkle path: path bits = leafIndex bits (LSB-first), siblings
-        // witnessed; selectively constrained to noteCommitmentRoot for real.
+        // witnessed; selectively constrained to the private inNoteRoot[i] for
+        // real inputs. Observers learn only the accumulator root, not the
+        // creation-era note root the path lands at.
         inPath[i] = MerklePath(32);
         inPath[i].leaf <== inNC[i].out;
         for (var b = 0; b < 32; b++) {
             inPath[i].pathBits[b] <== nbInLeaf[i].out[b];
             inPath[i].siblings[b] <== inSiblings[i][b];
         }
-        inIsReal[i] * (inPath[i].root - noteCommitmentRoot) === 0;
+        inIsReal[i] * (inPath[i].root - inNoteRoot[i]) === 0;
+
+        // Historical-note-root accumulator membership for real inputs.
+        nbInRootIdx[i] = Num2Bits(32);
+        nbInRootIdx[i].in <== inRootLogIndex[i];
+
+        histLeaf[i] = HistoricalNoteRootLeaf();
+        histLeaf[i].noteRoot     <== inNoteRoot[i];
+        histLeaf[i].rootLogIndex <== inRootLogIndex[i];
+
+        histPath[i] = MerklePath(32);
+        histPath[i].leaf <== histLeaf[i].out;
+        for (var b = 0; b < 32; b++) {
+            histPath[i].pathBits[b] <== nbInRootIdx[i].out[b];
+            histPath[i].siblings[b] <== inHistRootSiblings[i][b];
+        }
+        inIsReal[i] * (histPath[i].root - historicalNoteRootAccumulatorRoot) === 0;
 
         // Effective nullifier = real ? real-nullifier : phantom-nullifier
         inEffectiveNullifier[i] <== inPN[i].out + inIsReal[i] * (inNF[i].out - inPN[i].out);
@@ -459,7 +490,7 @@ template Pool() {
 }
 
 component main { public [
-    noteCommitmentRoot,
+    historicalNoteRootAccumulatorRoot,
     nullifier0, nullifier1,
     noteBodyCommitment0, noteBodyCommitment1, noteBodyCommitment2,
     publicAmountOut, publicRecipientAddress, publicTokenAddress,

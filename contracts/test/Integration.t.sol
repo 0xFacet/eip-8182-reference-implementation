@@ -91,7 +91,7 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
     function testPoolPrecompileRejectsNoncanonicalPublicInput() public view {
         bytes memory poolProof = vm.parseBytes(stdJson.readString(session, ".pool.proofHex"));
         ShieldedPool.PublicInputs memory pi = _readPublicInputs();
-        pi.noteCommitmentRoot = PoseidonFieldLib.FIELD_MODULUS;
+        pi.historicalNoteRootAccumulatorRoot = PoseidonFieldLib.FIELD_MODULUS;
 
         (bool ok, bytes memory ret) = PROOF_VERIFY_PRECOMPILE_ADDRESS.staticcall(
             abi.encode(poolProof, pi)
@@ -150,11 +150,12 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
             uint256 authRegRootBefore,
             uint256 authRevRootBefore
         ) = pool.getCurrentRoots();
+        (uint256 accRootBefore, ) = pool.getCurrentHistoricalNoteRootAccumulatorRoot();
 
         // Use real on-chain roots in the public inputs so the precompile
         // would have something to compare against (the mock ignores it).
         ShieldedPool.PublicInputs memory pi = ShieldedPool.PublicInputs({
-            noteCommitmentRoot: noteRootBefore,
+            historicalNoteRootAccumulatorRoot: accRootBefore,
             nullifier0: 0x111,
             nullifier1: 0x222,
             noteBodyCommitment0: 0xb1,
@@ -248,6 +249,72 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         assertEq(address(pool).balance, 1 ether);
     }
 
+    function testDepositAppendsHistoricalNoteRootAndEmitsFields() public {
+        (uint256 accBefore, uint32 idxBefore) =
+            pool.getCurrentHistoricalNoteRootAccumulatorRoot();
+        assertEq(uint256(idxBefore), 0, "fresh pool starts with no accumulator leaves");
+
+        uint256 ownerCommitment =
+            uint256(keccak256("owner commitment hist")) % PoseidonFieldLib.FIELD_MODULUS;
+        vm.deal(address(this), 1 ether);
+        vm.recordLogs();
+        pool.deposit{value: 1 ether}(address(0), 1 ether, ownerCommitment, "delivery");
+
+        (uint256 accAfter, uint32 idxAfter) =
+            pool.getCurrentHistoricalNoteRootAccumulatorRoot();
+        assertEq(uint256(idxAfter), 1, "deposit appends one accumulator leaf");
+        assertTrue(accAfter != accBefore, "accumulator root must advance");
+
+        // Submission buffer accepts both pre-deposit and post-deposit roots.
+        assertTrue(pool.isAcceptedHistoricalNoteRootAccumulatorRoot(accAfter));
+        assertTrue(pool.isAcceptedHistoricalNoteRootAccumulatorRoot(accBefore));
+
+        // The deposit event's last two fields carry index + post-insertion root.
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 sig = keccak256(
+            "ShieldedPoolDeposit(address,uint256,uint256,uint256,uint256,uint256,bytes,uint256,uint256)"
+        );
+        bool found;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].topics[0] == sig) {
+                (, , , , , bytes memory ond, uint256 histIdx, uint256 histRoot) =
+                    abi.decode(
+                        logs[i].data,
+                        (uint256, uint256, uint256, uint256, uint256, bytes, uint256, uint256)
+                    );
+                ond; // unused
+                assertEq(histIdx, 0, "first accumulator leaf is at index 0");
+                assertEq(histRoot, accAfter, "event root must equal current acc root");
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found, "ShieldedPoolDeposit event must be emitted");
+    }
+
+    function testTransactAppendsOneHistoricalNoteRootPerCall() public {
+        AcceptAllAuthVerifier alwaysAcceptAuth = new AcceptAllAuthVerifier();
+        AcceptAllPoolPrecompile alwaysAcceptPool = new AcceptAllPoolPrecompile();
+        vm.etch(PROOF_VERIFY_PRECOMPILE_ADDRESS, address(alwaysAcceptPool).code);
+
+        address sender = address(0x1234);
+        uint256 senderOnk = uint256(keccak256("acc-sender onk")) % PoseidonFieldLib.FIELD_MODULUS;
+        uint256 senderSeed = uint256(keccak256("acc-sender seed")) % PoseidonFieldLib.FIELD_MODULUS;
+        vm.prank(sender);
+        pool.registerUser(senderOnk, senderSeed);
+        vm.prank(sender);
+        pool.registerAuthPolicy(uint256(keccak256("policy x")) % PoseidonFieldLib.FIELD_MODULUS);
+
+        ShieldedPool.PublicInputs memory pi = _basePI(address(alwaysAcceptAuth));
+        (, uint32 idxBefore) = pool.getCurrentHistoricalNoteRootAccumulatorRoot();
+
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+
+        (, uint32 idxAfter) = pool.getCurrentHistoricalNoteRootAccumulatorRoot();
+        assertEq(uint256(idxAfter), uint256(idxBefore) + 1,
+            "transact appends exactly one accumulator leaf");
+    }
+
     // ----------------------- Layer 2: negative tests -------------------------
 
     /// @dev Etches the always-accept pool precompile, registers a sender, and
@@ -283,13 +350,14 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         returns (ShieldedPool.PublicInputs memory pi)
     {
         (
-            uint256 noteRoot,
+            ,
             uint256 userRoot,
             uint256 authRegRoot,
             uint256 authRevRoot
         ) = pool.getCurrentRoots();
+        (uint256 accRoot, ) = pool.getCurrentHistoricalNoteRootAccumulatorRoot();
         pi = ShieldedPool.PublicInputs({
-            noteCommitmentRoot: noteRoot,
+            historicalNoteRootAccumulatorRoot: accRoot,
             nullifier0: 0x111,
             nullifier1: 0x222,
             noteBodyCommitment0: 0xb1,
@@ -441,12 +509,12 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         pool.transact(new bytes(256), new bytes(256), pi, "OOPS", "o1", "o2");
     }
 
-    function testTransactRevertsUnknownNoteCommitmentRoot() public {
+    function testTransactRevertsUnknownHistoricalNoteRootAccumulatorRoot() public {
         (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
-        pi.noteCommitmentRoot = uint256(keccak256("not in history"))
+        pi.historicalNoteRootAccumulatorRoot = uint256(keccak256("not in history"))
             % PoseidonFieldLib.FIELD_MODULUS;
 
-        vm.expectRevert(ShieldedPool.UnknownNoteCommitmentRoot.selector);
+        vm.expectRevert(ShieldedPool.UnknownHistoricalNoteRootAccumulatorRoot.selector);
         pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
     }
 
@@ -640,7 +708,7 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
                 session, string.concat(".pool.publicSignals[", vm.toString(i), "]")
             );
         }
-        pi.noteCommitmentRoot = ps[0];
+        pi.historicalNoteRootAccumulatorRoot = ps[0];
         pi.nullifier0 = ps[1];
         pi.nullifier1 = ps[2];
         pi.noteBodyCommitment0 = ps[3];

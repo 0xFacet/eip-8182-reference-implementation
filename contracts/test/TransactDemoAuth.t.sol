@@ -141,14 +141,21 @@ contract TransactDemoAuthTest is Test, InstallSystemContractsBase {
             uint256 onChainAuthRegRoot,
             uint256 onChainAuthRevRoot
         ) = pool.getCurrentRoots();
-        assertEq(onChainNoteRoot,    pi.noteCommitmentRoot,
-            "note tree root mismatch (witness vs contract)");
+        (uint256 onChainAccRoot, uint32 onChainAccNextIndex) =
+            pool.getCurrentHistoricalNoteRootAccumulatorRoot();
+        assertEq(onChainAccRoot, pi.historicalNoteRootAccumulatorRoot,
+            "historical note-root accumulator root mismatch (witness vs contract)");
+        assertEq(uint256(onChainAccNextIndex), 2,
+            "expected two accumulator leaves after two deposits");
         assertEq(onChainRegistryRoot, pi.registryRoot,
             "user registry root mismatch");
         assertEq(onChainAuthRegRoot, pi.authPolicyRegistrationRoot,
             "auth-policy registration root mismatch");
         assertEq(onChainAuthRevRoot, pi.authPolicyRevocationRoot,
             "auth-policy revocation root mismatch");
+        // Use onChainNoteRoot for a sanity assertion that the note tree did
+        // advance with both deposits (private to the prover, no spend role).
+        assertTrue(onChainNoteRoot != 0, "note tree must have post-deposit root");
 
         // 5. Submit the proof.
         bytes memory poolProof = vm.parseBytes(stdJson.readString(session, ".pool.proofHex"));
@@ -169,6 +176,10 @@ contract TransactDemoAuthTest is Test, InstallSystemContractsBase {
         assertTrue(pool.isIntentReplayIdUsed(pi.intentReplayId), "intentReplayId must be consumed");
         (uint256 noteRootAfter,,,) = pool.getCurrentRoots();
         assertTrue(noteRootAfter != onChainNoteRoot, "note root must advance after transact");
+        (uint256 accRootAfter, uint32 accNextIndexAfter) =
+            pool.getCurrentHistoricalNoteRootAccumulatorRoot();
+        assertTrue(accRootAfter != onChainAccRoot, "accumulator root must advance after transact");
+        assertEq(uint256(accNextIndexAfter), 3, "transact appends one accumulator leaf");
     }
 
     function _register(address user, uint256 nullifierKey, uint256 noteSecretSeed) private {
@@ -188,7 +199,7 @@ contract TransactDemoAuthTest is Test, InstallSystemContractsBase {
                 session, string.concat(".pool.publicSignals[", vm.toString(i), "]")
             );
         }
-        pi.noteCommitmentRoot = ps[0];
+        pi.historicalNoteRootAccumulatorRoot = ps[0];
         pi.nullifier0 = ps[1];
         pi.nullifier1 = ps[2];
         pi.noteBodyCommitment0 = ps[3];

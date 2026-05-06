@@ -26,6 +26,8 @@ library PoseidonFieldLib {
         uint256(keccak256("eip-8182.auth_policy")) % FIELD_MODULUS;
     uint256 internal constant USER_REGISTRY_LEAF_DOMAIN =
         uint256(keccak256("eip-8182.user_registry_leaf")) % FIELD_MODULUS;
+    uint256 internal constant HISTORICAL_NOTE_ROOT_LEAF_DOMAIN =
+        uint256(keccak256("eip-8182.historical_note_root_leaf")) % FIELD_MODULUS;
 
     function merkleHash(uint256 left, uint256 right) internal pure returns (uint256) {
         return Poseidon2Sponge.hashPair(left, right);
@@ -86,5 +88,17 @@ library PoseidonFieldLib {
 
     function dummyOwnerNullifierKeyHash() internal pure returns (uint256) {
         return Poseidon2Sponge.hashPair(OWNER_NULLIFIER_KEY_HASH_DOMAIN, 0xdead);
+    }
+
+    function historicalNoteRootLeaf(uint256 noteRoot, uint256 rootLogIndex)
+        internal
+        pure
+        returns (uint256)
+    {
+        return Poseidon2Sponge.hash3(
+            HISTORICAL_NOTE_ROOT_LEAF_DOMAIN,
+            noteRoot,
+            rootLogIndex
+        );
     }
 }

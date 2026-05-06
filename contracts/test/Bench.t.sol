@@ -452,7 +452,7 @@ contract BenchTest is Test, InstallSystemContractsBase {
                 session, string.concat(".pool.publicSignals[", vm.toString(i), "]")
             );
         }
-        pi.noteCommitmentRoot         = ps[0];
+        pi.historicalNoteRootAccumulatorRoot = ps[0];
         pi.nullifier0                 = ps[1];
         pi.nullifier1                 = ps[2];
         pi.noteBodyCommitment0        = ps[3];

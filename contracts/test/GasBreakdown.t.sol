@@ -71,14 +71,15 @@ contract GasBreakdownTest is Test, InstallSystemContractsBase {
         pool.registerAuthPolicy(0xa3);
 
         (
-            uint256 noteRoot,
+            ,
             uint256 userRoot,
             uint256 authReg,
             uint256 authRev
         ) = pool.getCurrentRoots();
+        (uint256 accRoot, ) = pool.getCurrentHistoricalNoteRootAccumulatorRoot();
 
         ShieldedPool.PublicInputs memory pi = ShieldedPool.PublicInputs({
-            noteCommitmentRoot: noteRoot,
+            historicalNoteRootAccumulatorRoot: accRoot,
             nullifier0: 0x111,
             nullifier1: 0x222,
             noteBodyCommitment0: 0xb1,

@@ -22,7 +22,7 @@ contract MockPoolPrecompile {
 
     /// @notice Spec contract: 21 public inputs in declaration order.
     struct PublicInputs {
-        uint256 noteCommitmentRoot;
+        uint256 historicalNoteRootAccumulatorRoot;
         uint256 nullifier0;
         uint256 nullifier1;
         uint256 noteBodyCommitment0;
@@ -83,7 +83,7 @@ contract MockPoolPrecompile {
         uint256[2] memory pC = [_word(proofBytes, 192), _word(proofBytes, 224)];
 
         uint256[21] memory pub;
-        pub[0]  = pi.noteCommitmentRoot;
+        pub[0]  = pi.historicalNoteRootAccumulatorRoot;
         pub[1]  = pi.nullifier0;
         pub[2]  = pi.nullifier1;
         pub[3]  = pi.noteBodyCommitment0;

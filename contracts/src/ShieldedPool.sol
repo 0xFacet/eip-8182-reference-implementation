@@ -14,13 +14,14 @@ contract ShieldedPool {
     // -------------------------------- Constants --------------------------------
 
     uint256 internal constant MAX_INTENT_LIFETIME = 86400;
-    uint256 internal constant NOTE_COMMITMENT_ROOT_HISTORY_SIZE = 500;
     uint256 internal constant USER_REGISTRY_ROOT_HISTORY_BLOCKS = 500;
     uint256 internal constant AUTH_POLICY_REGISTRATION_ROOT_HISTORY_SIZE = 500;
     uint256 internal constant AUTH_POLICY_ROOT_HISTORY_BLOCKS = 64;
     uint256 internal constant COMMITMENT_TREE_DEPTH = 32;
     uint256 internal constant REGISTRY_TREE_DEPTH = 160;
     uint256 internal constant AUTH_POLICY_TREE_DEPTH = 32;
+    uint256 internal constant HISTORICAL_NOTE_ROOT_TREE_DEPTH = 32;
+    uint256 internal constant HISTORICAL_NOTE_ROOT_ACCUMULATOR_HISTORY_SIZE = 64;
     uint256 internal constant MAX_LEAF_INDEX = type(uint32).max;
     uint256 internal constant MAX_ADDRESS_VALUE = type(uint160).max;
     uint256 internal constant MAX_AMOUNT_VALUE = type(uint248).max;
@@ -34,7 +35,7 @@ contract ShieldedPool {
 
     /// @notice 21 public inputs per EIP-8182 Section 5.3 / Section 10.
     struct PublicInputs {
-        uint256 noteCommitmentRoot;
+        uint256 historicalNoteRootAccumulatorRoot;
         uint256 nullifier0;
         uint256 nullifier1;
         uint256 noteBodyCommitment0;
@@ -106,7 +107,7 @@ contract ShieldedPool {
     error UnexpectedEth();
     error UnknownAuthPolicyRegistrationRoot();
     error UnknownAuthPolicyRevocationRoot();
-    error UnknownNoteCommitmentRoot();
+    error UnknownHistoricalNoteRootAccumulatorRoot();
     error UnknownUserRegistryRoot();
     error UserAlreadyRegistered();
     error UserNotRegistered();
@@ -131,7 +132,9 @@ contract ShieldedPool {
         uint256 postInsertionCommitmentRoot,
         bytes outputNoteData0,
         bytes outputNoteData1,
-        bytes outputNoteData2
+        bytes outputNoteData2,
+        uint256 historicalNoteRootIndex,
+        uint256 postInsertionHistoricalNoteRootAccumulatorRoot
     );
 
     event ShieldedPoolDeposit(
@@ -141,7 +144,9 @@ contract ShieldedPool {
         uint256 amount,
         uint256 tokenAddress,
         uint256 postInsertionCommitmentRoot,
-        bytes outputNoteData
+        bytes outputNoteData,
+        uint256 historicalNoteRootIndex,
+        uint256 postInsertionHistoricalNoteRootAccumulatorRoot
     );
 
     event UserRegistered(
@@ -170,9 +175,21 @@ contract ShieldedPool {
     // Note-commitment tree (depth-32 append-only).
     uint256 internal nextLeafIndex;
     uint256 internal currentNoteCommitmentRoot;
-    uint256 internal noteCommitmentRootHistoryCount;
     mapping(uint256 => uint256) private filledNoteCommitmentSubtrees;
-    mapping(uint256 => uint256) internal noteCommitmentRootHistory;
+
+    // Historical note-root accumulator (depth-32 append-only). One leaf is
+    // appended per note-insertion batch (one per deposit, one per transact).
+    // Spend acceptance compares the public input's accumulator root against
+    // the current root or a small recent-root submission buffer; the
+    // 500-entry note-commitment-root ring buffer is removed.
+    uint256 internal currentHistoricalNoteRootAccumulatorRoot;
+    // Stored as uint256 internally; capped one leaf short of the depth-32
+    // mathematical capacity so the value always fits in uint32 for the
+    // public read API.
+    uint256 internal nextHistoricalNoteRootIndex;
+    mapping(uint256 => uint256) private filledHistoricalNoteRootSubtrees;
+    uint256 internal historicalNoteRootAccumulatorHistoryCount;
+    mapping(uint256 => uint256) internal historicalNoteRootAccumulatorHistory;
 
     // User-registry tree (depth-160 sparse, MSB-first key).
     uint256 internal currentUserRegistryRoot;
@@ -211,6 +228,7 @@ contract ShieldedPool {
     uint256[REGISTRY_TREE_DEPTH] internal userRegistrySparseEmptyHashes;
     uint256[AUTH_POLICY_TREE_DEPTH] internal authPolicyRegistrationEmptyHashes;
     uint256[AUTH_POLICY_TREE_DEPTH] internal authPolicyRevocationSparseEmptyHashes;
+    uint256[HISTORICAL_NOTE_ROOT_TREE_DEPTH] internal historicalNoteRootEmptyHashes;
 
     // -------------------------------- Modifier --------------------------------
 
@@ -261,8 +279,10 @@ contract ShieldedPool {
 
         // Steps 3-6: roots.
         require(
-            isAcceptedNoteCommitmentRoot(publicInputs.noteCommitmentRoot),
-            UnknownNoteCommitmentRoot()
+            isAcceptedHistoricalNoteRootAccumulatorRoot(
+                publicInputs.historicalNoteRootAccumulatorRoot
+            ),
+            UnknownHistoricalNoteRootAccumulatorRoot()
         );
         require(publicInputs.registryRoot != 0, ZeroRegistryRoot());
         require(
@@ -337,11 +357,18 @@ contract ShieldedPool {
         uint256 leafIndex0 = nextLeafIndex;
         require(leafIndex0 + 3 <= MAX_LEAF_INDEX + 1, TreeFull());
         uint256[3] memory commitments = _sealTransactCommitments(publicInputs, leafIndex0);
-        _pushNoteCommitmentRootHistory(currentNoteCommitmentRoot);
         _insertNoteCommitment(commitments[0]);
         _insertNoteCommitment(commitments[1]);
         _insertNoteCommitment(commitments[2]);
-        _emitTransact(publicInputs, commitments, leafIndex0, outputNoteData0, outputNoteData1, outputNoteData2);
+        _appendHistoricalNoteRoot(currentNoteCommitmentRoot);
+        _emitTransact(
+            publicInputs,
+            commitments,
+            leafIndex0,
+            outputNoteData0,
+            outputNoteData1,
+            outputNoteData2
+        );
     }
 
     function _emitTransact(
@@ -352,6 +379,11 @@ contract ShieldedPool {
         bytes calldata outputNoteData1,
         bytes calldata outputNoteData2
     ) private {
+        // historicalNoteRootIndex / postInsertionHistoricalNoteRootAccumulatorRoot
+        // are read from storage rather than threaded as locals to avoid
+        // stack-too-deep when emitting all event fields without via_ir.
+        // _appendHistoricalNoteRoot has already advanced both before this is
+        // called, so nextHistoricalNoteRootIndex - 1 is the just-appended index.
         emit ShieldedPoolTransact(
             publicInputs.nullifier0,
             publicInputs.nullifier1,
@@ -364,7 +396,9 @@ contract ShieldedPool {
             currentNoteCommitmentRoot,
             outputNoteData0,
             outputNoteData1,
-            outputNoteData2
+            outputNoteData2,
+            nextHistoricalNoteRootIndex - 1,
+            currentHistoricalNoteRootAccumulatorRoot
         );
     }
 
@@ -459,17 +493,39 @@ contract ShieldedPool {
         uint256 leafIndex = nextLeafIndex;
         require(leafIndex + 1 <= MAX_LEAF_INDEX + 1, TreeFull());
 
+        uint256 finalCommitment = _sealDepositCommitment(token, amount, ownerCommitment, leafIndex);
+
+        _insertNoteCommitment(finalCommitment);
+        _appendHistoricalNoteRoot(currentNoteCommitmentRoot);
+
+        _emitDeposit(token, amount, finalCommitment, leafIndex, outputNoteData);
+    }
+
+    function _sealDepositCommitment(
+        address token,
+        uint256 amount,
+        uint256 ownerCommitment,
+        uint256 leafIndex
+    ) private pure returns (uint256 finalCommitment) {
         uint256 body = PoseidonFieldLib.noteBodyCommitment(
             ownerCommitment,
             amount,
             uint256(uint160(token))
         );
-        uint256 finalCommitment = PoseidonFieldLib.noteCommitment(body, leafIndex);
+        finalCommitment = PoseidonFieldLib.noteCommitment(body, leafIndex);
         require(finalCommitment != 0, ZeroNoteCommitment());
+    }
 
-        _pushNoteCommitmentRootHistory(currentNoteCommitmentRoot);
-        _insertNoteCommitment(finalCommitment);
-
+    function _emitDeposit(
+        address token,
+        uint256 amount,
+        uint256 finalCommitment,
+        uint256 leafIndex,
+        bytes calldata outputNoteData
+    ) private {
+        // historicalNoteRootIndex / postInsertionHistoricalNoteRootAccumulatorRoot
+        // are read from storage to avoid stack-too-deep without via_ir.
+        // _appendHistoricalNoteRoot has already advanced both.
         emit ShieldedPoolDeposit(
             msg.sender,
             finalCommitment,
@@ -477,7 +533,9 @@ contract ShieldedPool {
             amount,
             uint256(uint160(token)),
             currentNoteCommitmentRoot,
-            outputNoteData
+            outputNoteData,
+            nextHistoricalNoteRootIndex - 1,
+            currentHistoricalNoteRootAccumulatorRoot
         );
     }
 
@@ -660,16 +718,33 @@ contract ShieldedPool {
         return intentReplayIdUsed[intentReplayId];
     }
 
-    function isAcceptedNoteCommitmentRoot(uint256 root) public view returns (bool) {
-        if (root == currentNoteCommitmentRoot) return true;
-        uint256 historyLength = noteCommitmentRootHistoryCount;
-        if (historyLength > NOTE_COMMITMENT_ROOT_HISTORY_SIZE) {
-            historyLength = NOTE_COMMITMENT_ROOT_HISTORY_SIZE;
+    function isAcceptedHistoricalNoteRootAccumulatorRoot(uint256 root)
+        public
+        view
+        returns (bool)
+    {
+        if (root == currentHistoricalNoteRootAccumulatorRoot) return true;
+        uint256 historyLength = historicalNoteRootAccumulatorHistoryCount;
+        if (historyLength > HISTORICAL_NOTE_ROOT_ACCUMULATOR_HISTORY_SIZE) {
+            historyLength = HISTORICAL_NOTE_ROOT_ACCUMULATOR_HISTORY_SIZE;
         }
         for (uint256 slot; slot < historyLength; ++slot) {
-            if (noteCommitmentRootHistory[slot] == root) return true;
+            if (historicalNoteRootAccumulatorHistory[slot] == root) return true;
         }
         return false;
+    }
+
+    function getCurrentHistoricalNoteRootAccumulatorRoot()
+        external
+        view
+        returns (uint256 root, uint32 nextIndex)
+    {
+        // Cast is safe by construction: _appendHistoricalNoteRoot caps
+        // nextHistoricalNoteRootIndex at MAX_LEAF_INDEX = type(uint32).max.
+        return (
+            currentHistoricalNoteRootAccumulatorRoot,
+            uint32(nextHistoricalNoteRootIndex)
+        );
     }
 
     function isAcceptedUserRegistryRoot(uint256 root) public view returns (bool) {
@@ -711,13 +786,44 @@ contract ShieldedPool {
 
     // -------------------------------- Tree maintenance --------------------------------
 
-    function _pushNoteCommitmentRootHistory(uint256 root) private {
-        noteCommitmentRootHistory[
-            noteCommitmentRootHistoryCount % NOTE_COMMITMENT_ROOT_HISTORY_SIZE
-        ] = root;
+    function _appendHistoricalNoteRoot(uint256 noteRoot)
+        private
+        returns (uint256 index, uint256 newRoot)
+    {
+        index = nextHistoricalNoteRootIndex;
+        // Capped one leaf short of the depth-32 mathematical capacity
+        // (2^32 - 1 leaves) so the stored next-index always fits in uint32.
+        require(index < MAX_LEAF_INDEX, TreeFull());
+
+        uint256 leaf = PoseidonFieldLib.historicalNoteRootLeaf(noteRoot, index);
+
+        // Push the previous accumulator root into the recent-root submission
+        // buffer (matching the pre-insert push order of the prior
+        // note-commitment ring buffer).
+        historicalNoteRootAccumulatorHistory[
+            historicalNoteRootAccumulatorHistoryCount %
+                HISTORICAL_NOTE_ROOT_ACCUMULATOR_HISTORY_SIZE
+        ] = currentHistoricalNoteRootAccumulatorRoot;
         unchecked {
-            ++noteCommitmentRootHistoryCount;
+            ++historicalNoteRootAccumulatorHistoryCount;
         }
+
+        uint256 currentHash = leaf;
+        for (uint256 level; level < HISTORICAL_NOTE_ROOT_TREE_DEPTH; ++level) {
+            if (((index >> level) & 1) == 0) {
+                filledHistoricalNoteRootSubtrees[level] = currentHash;
+                currentHash = PoseidonFieldLib.merkleHash(
+                    currentHash, historicalNoteRootEmptyHashes[level]
+                );
+            } else {
+                currentHash = PoseidonFieldLib.merkleHash(
+                    filledHistoricalNoteRootSubtrees[level], currentHash
+                );
+            }
+        }
+        currentHistoricalNoteRootAccumulatorRoot = currentHash;
+        nextHistoricalNoteRootIndex = index + 1;
+        newRoot = currentHash;
     }
 
     function _pushAuthPolicyRegistrationRootHistory(uint256 root) private {

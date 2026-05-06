@@ -175,6 +175,27 @@ const cases = [
     },
   },
   {
+    name: 'wrong rootLogIndex (accumulator membership fails)',
+    mutate: (i) => {
+      // Witnessed accumulator path lands at index 0 (slot 0's witness).
+      // Mutating to index 5 changes histLeaf and the path bits, so the
+      // recomputed accumulator root no longer matches
+      // historicalNoteRootAccumulatorRoot.
+      i.inRootLogIndex[0] = '5';
+      return i;
+    },
+  },
+  {
+    name: 'wrong noteRoot (per-input note membership fails)',
+    mutate: (i) => {
+      // Perturb slot 0's claimed creation-era noteRoot. The Merkle path's
+      // computed root no longer equals inNoteRoot[0] for the real input.
+      const r0 = BigInt(i.inNoteRoot[0]);
+      i.inNoteRoot[0] = ((r0 + 1n) % BigInt('21888242871839275222246405745257275088548364400416034343698204186575808495617')).toString();
+      return i;
+    },
+  },
+  {
     name: 'withdrawal-mode witness with outIsReal[1] = 1 (forbidden)',
     mutate: (i) => {
       // Force withdrawal: publicAmountOut > 0 -> operationKind derives to 1.

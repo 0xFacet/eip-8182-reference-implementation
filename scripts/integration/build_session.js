@@ -101,6 +101,18 @@ function run(cmd, args, opts = {}) {
   const t1 = Date.now();
   console.log(`    pool proved in ${(t1 - t0) / 1000}s`);
 
+  // Emit proof.json + public.json adjacent to the witness binary, in the
+  // same shape `snarkjs groth16 prove --proof ... --public ...` writes from
+  // the CLI. scripts/assets/refresh.sh reads these.
+  fs.writeFileSync(
+    path.join(POOL_DIR, "proof.json"),
+    JSON.stringify(poolProof, null, 2),
+  );
+  fs.writeFileSync(
+    path.join(POOL_DIR, "public.json"),
+    JSON.stringify(poolPublics, null, 2),
+  );
+
   console.log("==> proving auth");
   const t2 = Date.now();
   const { proof: authProof, publicSignals: authPublics } = await snarkjs.groth16.prove(

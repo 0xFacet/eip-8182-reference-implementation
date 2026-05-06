@@ -67,6 +67,18 @@ contract ShieldedPoolInstallHarness is ShieldedPool {
             authPolicyRevocationSparseEmptyHashes[AUTH_POLICY_TREE_DEPTH - 1],
             authPolicyRevocationSparseEmptyHashes[AUTH_POLICY_TREE_DEPTH - 1]
         );
+
+        // Historical note-root accumulator (depth 32, append-only).
+        historicalNoteRootEmptyHashes[0] = 0;
+        for (uint256 i = 1; i < HISTORICAL_NOTE_ROOT_TREE_DEPTH; ++i) {
+            historicalNoteRootEmptyHashes[i] = PoseidonFieldLib.merkleHash(
+                historicalNoteRootEmptyHashes[i - 1], historicalNoteRootEmptyHashes[i - 1]
+            );
+        }
+        currentHistoricalNoteRootAccumulatorRoot = PoseidonFieldLib.merkleHash(
+            historicalNoteRootEmptyHashes[HISTORICAL_NOTE_ROOT_TREE_DEPTH - 1],
+            historicalNoteRootEmptyHashes[HISTORICAL_NOTE_ROOT_TREE_DEPTH - 1]
+        );
     }
 }
 
