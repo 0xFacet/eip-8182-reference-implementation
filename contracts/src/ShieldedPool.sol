@@ -57,11 +57,6 @@ contract ShieldedPool {
         uint256 transactionIntentDigest;
     }
 
-    struct DeliveryEndpoint {
-        uint32 schemeId;
-        bytes keyBytes;
-    }
-
     struct UserRegistryEntry {
         bool registered;
         uint256 ownerNullifierKeyHash;
@@ -89,8 +84,6 @@ contract ShieldedPool {
     error IntentExpired();
     error IntentLifetimeTooLong();
     error IntentReplayIdAlreadyUsed();
-    error InvalidDeliveryKey();
-    error DeliveryKeyNotSet();
     error InvalidDepositAmount();
     error InvalidOutputNoteDataHash(uint8 slot);
     error InvalidOwnerCommitment();
@@ -152,10 +145,6 @@ contract ShieldedPool {
 
     event NoteSecretSeedRotated(address indexed user, uint256 noteSecretSeedHash);
 
-    event DeliveryKeySet(address indexed user, uint32 indexed schemeId, bytes keyBytes);
-
-    event DeliveryKeyRemoved(address indexed user, uint32 indexed schemeId);
-
     event AuthPolicyRegistered(
         address indexed user,
         uint256 leafPosition,
@@ -182,7 +171,6 @@ contract ShieldedPool {
     mapping(uint256 => uint256) internal userRegistryRootBlock;
     mapping(address => UserRegistryEntry) private userRegistryEntries;
     mapping(uint256 => address) private ownerNullifierKeyHashIndex;
-    mapping(address => DeliveryEndpoint) private deliveryEndpoints;
 
     // Auth-policy registration tree (depth-32 append-only). Circular-buffer
     // root history because every successful `registerAuthPolicy` advances the
@@ -487,16 +475,6 @@ contract ShieldedPool {
         _registerUser(msg.sender, ownerNullifierKeyHash, noteSecretSeedHash);
     }
 
-    function registerUser(
-        uint256 ownerNullifierKeyHash,
-        uint256 noteSecretSeedHash,
-        uint32 schemeId,
-        bytes calldata keyBytes
-    ) external {
-        _registerUser(msg.sender, ownerNullifierKeyHash, noteSecretSeedHash);
-        _setDeliveryKey(msg.sender, schemeId, keyBytes);
-    }
-
     function rotateNoteSecretSeed(uint256 newNoteSecretSeedHash) external {
         require(newNoteSecretSeedHash < PoseidonFieldLib.FIELD_MODULUS, FieldElementNotCanonical());
         UserRegistryEntry storage entry = userRegistryEntries[msg.sender];
@@ -549,33 +527,6 @@ contract ShieldedPool {
         });
         ownerNullifierKeyHashIndex[ownerNullifierKeyHash] = user;
         emit UserRegistered(user, ownerNullifierKeyHash, noteSecretSeedHash);
-    }
-
-    // -------------------------------- Delivery key --------------------------------
-
-    function setDeliveryKey(uint32 schemeId, bytes calldata keyBytes) external {
-        require(userRegistryEntries[msg.sender].registered, UserNotRegistered());
-        _setDeliveryKey(msg.sender, schemeId, keyBytes);
-    }
-
-    function removeDeliveryKey() external {
-        require(userRegistryEntries[msg.sender].registered, UserNotRegistered());
-        DeliveryEndpoint storage endpoint = deliveryEndpoints[msg.sender];
-        require(endpoint.schemeId != 0, DeliveryKeyNotSet());
-        uint32 oldSchemeId = endpoint.schemeId;
-        delete deliveryEndpoints[msg.sender];
-        emit DeliveryKeyRemoved(msg.sender, oldSchemeId);
-    }
-
-    function _setDeliveryKey(address user, uint32 schemeId, bytes calldata keyBytes) private {
-        require(schemeId != 0 && keyBytes.length != 0, InvalidDeliveryKey());
-        deliveryEndpoints[user] = DeliveryEndpoint({schemeId: schemeId, keyBytes: keyBytes});
-        emit DeliveryKeySet(user, schemeId, keyBytes);
-    }
-
-    function getDeliveryKey(address user) external view returns (uint32 schemeId, bytes memory keyBytes) {
-        DeliveryEndpoint storage endpoint = deliveryEndpoints[user];
-        return (endpoint.schemeId, endpoint.keyBytes);
     }
 
     // -------------------------------- Auth-policy registry --------------------------------

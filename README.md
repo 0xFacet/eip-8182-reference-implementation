@@ -61,7 +61,6 @@ The spec at `EIPS/eip-8182.md` references these asset files under `assets/eip-81
 | `shielded-pool-state.json` | Genesis state dump installed at `SHIELDED_POOL_ADDRESS` at activation fork (Section 5.1) | `contracts/script/InstallSystemContracts.s.sol` |
 | `poseidon2_bn254_t4_rf8_rp56.json` | Round constants + internal diagonal | hand-curated, never regenerated |
 | `poseidon2_vectors.json` | Cross-impl test vectors for the sponge | hand-curated |
-| `delivery_scheme1_vectors.json` | Companion-standard delivery scheme 1 (ML-KEM-768 / FIPS 203) test vectors | hand-curated |
 
 Refresh everything in one command:
 
