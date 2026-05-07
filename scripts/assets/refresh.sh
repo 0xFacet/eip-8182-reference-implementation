@@ -8,12 +8,11 @@
 #
 # Outputs: assets/eip-8182/pool_vk.bin
 #          assets/eip-8182/pool_vk.sha256
-#          assets/eip-8182/pool_precompile_happy_path.json
-#          assets/eip-8182/pool_precompile_invalid_proof.json
-#          assets/eip-8182/pool_precompile_noncanonical_field.json
+#          assets/eip-8182/pool_verify_happy_path.json
+#          assets/eip-8182/pool_verify_invalid_proof.json
+#          assets/eip-8182/pool_verify_noncanonical_field.json
 #          assets/eip-8182/shielded-pool-state.json
-#          (the unchanged poseidon2_*, delivery_scheme1_vectors.json files
-#           are left in place)
+#          (the unchanged poseidon2_* files are left in place)
 #
 # Optional: EIP_ASSETS_DIR=/path/to/EIPs/assets/eip-8182 to also copy the
 # refreshed bundle into the spec repo.
@@ -36,14 +35,14 @@ echo "==> pool_vk.bin"
 node scripts/assets/vk_to_bin.js "$POOL_DIR/pool_vkey.json" "$ASSETS_LOCAL/pool_vk.bin"
 shasum -a 256 "$ASSETS_LOCAL/pool_vk.bin" | awk '{print $1}' > "$ASSETS_LOCAL/pool_vk.sha256"
 
-# 2. Three precompile vectors.
-echo "==> precompile vectors"
-# build_session.js produces a fresh pool proof + public.json from the worst-case witness.
+# 2. Three pool-verify vectors (typed inputs to ShieldedPool.verifyProof).
+echo "==> pool-verify vectors"
+# build_session.js writes build/integration/session.json — a fresh worst-case
+# pool proof against the current zkey, plus its 21 public signals.
 node scripts/integration/build_session.js >/dev/null
-node scripts/assets/gen_precompile_vectors.js \
+node scripts/assets/gen_pool_verify_vectors.js \
   "$POOL_DIR/pool_vkey.json" \
-  "$POOL_DIR/proof.json" \
-  "$POOL_DIR/public.json" \
+  "build/integration/session.json" \
   "$ASSETS_LOCAL"
 
 # 3. Shielded-pool genesis state dump (depends on the deployed contract).
@@ -52,7 +51,7 @@ forge script contracts/script/InstallSystemContracts.s.sol:InstallSystemContract
   --ffi --silent
 cp build/shielded-pool-state.json "$ASSETS_LOCAL/shielded-pool-state.json"
 
-# 4. Optionally mirror EIP-referenced files into the spec repo. The precompile
+# 4. Optionally mirror EIP-referenced files into the spec repo. The pool-verify
 # vectors are NOT referenced from the spec — they exist only as integration
 # fixtures for this reference implementation.
 if [ -n "${EIP_ASSETS_DIR:-}" ]; then

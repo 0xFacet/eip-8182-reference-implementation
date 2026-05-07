@@ -12,17 +12,18 @@
 //
 // The transact breakdown is grouped into four categories so a reader can see
 // what's intrinsic to EIP-8182 vs. what's an implementation choice that can be
-// substituted, vs. what's a stand-in number that won't reflect reality on a
-// real chain:
+// substituted:
 //
 //   * EIP-8182 intrinsic — tree insertion, nullifier writes, replay-id write,
 //     output-hash checks, history push, event emission, dispatch, range checks.
 //     Reported as a residual: total - (everything below).
 //   * Implementation choice — auth verifier (we bench Honk; Groth16 is ~10x
 //     cheaper, ECDSA-only would be cheaper still) and asset movement.
-//   * Mocked / artificial — pool proof verify. The real EIP-8182 precompile
-//     would charge a fixed gas amount; here we approximate with a Solidity
-//     Groth16 verifier etched at 0x...30. Treat as an upper bound.
+//   * Pool proof verify (inline) — Section 5.5 verifies the pool proof inline
+//     against the embedded VK using BN254 precompiles (ECADD/ECMUL/ECPAIRING).
+//     The number reported is the step-9 inline path measured directly via
+//     ShieldedPoolStepNineHarness.exposeVerifyPoolProof (warm self-staticcall),
+//     which is what `transact` executes.
 //   * Calldata — the EVM's per-byte cost of carrying the proof bytes on the
 //     wire. Pulled out separately so readers can see how much each proof
 //     costs just to ship.
@@ -79,15 +80,10 @@ const benches = {
 };
 
 const TX_BASE_INTRINSIC = 21000;
-// Per EIP-8182 §5.5: proof-verify precompile gas. Derivation: a Solidity
-// Groth16 verifier with 21 public inputs costs ~335K gas (final pairing ~181K
-// + IC sum ~129K + dispatch ~25K). A native precompile can fold the IC sum
-// more tightly than EVM dispatch allows, so we model a ~10% discount: 300K.
-const POOL_VERIFY_SPEC_GAS = 300_000;
 
-// Total a real user pays = base intrinsic + tx calldata gas + EVM execution,
-// adjusted to use the spec precompile gas instead of the mocked Solidity
-// verifier we measure on-chain.
+// Total a real user pays = base intrinsic + tx calldata gas + EVM execution.
+// `exec_gas` was measured with the Honk auth verifier; we adjust to the
+// Groth16-auth modeled flow by swapping the auth-verify cost.
 function fullTotal(b) {
   if (!b || b.skipped) return null;
   if (b.exec_gas == null) return null;
@@ -95,9 +91,7 @@ function fullTotal(b) {
     const execModeled =
         b.exec_gas
       - b.auth_verify_honk
-      + b.auth_verify_groth16
-      - b.pool_verify_mocked
-      + POOL_VERIFY_SPEC_GAS;
+      + b.auth_verify_groth16;
     return TX_BASE_INTRINSIC + b.tx_calldata_gas_groth16 + execModeled;
   }
   return TX_BASE_INTRINSIC + (b.tx_calldata_gas || 0) + b.exec_gas;
@@ -165,7 +159,7 @@ function transactBuckets(b) {
   const execGas        = b.exec_gas                  || 0;
   const txCdGroth16    = b.tx_calldata_gas_groth16   || 0;
   const txCdHonk       = b.tx_calldata_gas_honk      || 0;
-  const poolVerifyMock = b.pool_verify_mocked        || 0;
+  const poolVerifyInline = b.pool_verify_via_harness || 0;
   const authHonk       = b.auth_verify_honk          || 0;
   const authGroth16    = b.auth_verify_groth16       || 0;
   const asset          = b.asset_movement            || 0;
@@ -174,31 +168,26 @@ function transactBuckets(b) {
   const authCdHonk     = b.auth_calldata_gas_honk    || 0;
   const restCdGroth16  = txCdGroth16 - poolCd - authCdGroth16;
 
-  // exec_gas was measured with the Honk auth verifier and the Solidity Groth16
-  // pool-verify stand-in. Adjust to the modeled flow:
-  //   - swap Honk auth verify for Groth16 auth verify
-  //   - swap mocked Solidity pool verify for the spec precompile gas (§5.5)
-  const execModeled =
-      execGas
-    - authHonk    + authGroth16
-    - poolVerifyMock + POOL_VERIFY_SPEC_GAS;
+  // exec_gas was measured with the Honk auth verifier. Adjust by swapping
+  // Honk auth verify for Groth16 auth verify; the inline pool-verify is
+  // already included in execGas at its real cost.
+  const execModeled = execGas - authHonk + authGroth16;
   // EIP-8182 intrinsic = exec gas minus directly-attributable buckets.
-  const intrinsic = execModeled - (POOL_VERIFY_SPEC_GAS + authGroth16 + asset);
+  const intrinsic = execModeled - (poolVerifyInline + authGroth16 + asset);
 
   // Mandatory: everything except the auth verify + auth calldata.
   const mandatory =
       TX_BASE_INTRINSIC
     + poolCd
     + restCdGroth16
-    + POOL_VERIFY_SPEC_GAS
+    + poolVerifyInline
     + asset
     + intrinsic;
   const discretionary = authGroth16 + authCdGroth16;
   const total = mandatory + discretionary;
 
-  // Reference: if you'd shipped Honk instead of Groth16. Same precompile gas.
-  const honkExecModeled = execGas - poolVerifyMock + POOL_VERIFY_SPEC_GAS;
-  const totalHonk = TX_BASE_INTRINSIC + txCdHonk + honkExecModeled;
+  // Reference: if you'd shipped Honk instead of Groth16.
+  const totalHonk = TX_BASE_INTRINSIC + txCdHonk + execGas;
 
   return {
     sections: [
@@ -206,7 +195,7 @@ function transactBuckets(b) {
         ["Tx base intrinsic (Berlin)",                                   TX_BASE_INTRINSIC],
         ["Calldata: pool proof (256 B)",                                 poolCd],
         ["Calldata: rest (public inputs, ond bytes, selector, offsets)", restCdGroth16],
-        ["Pool proof verify (precompile, EIP-8182 §5.5)",                POOL_VERIFY_SPEC_GAS],
+        ["Pool proof verify (inline §5.5; via harness +<0.2%)",          poolVerifyInline],
         ...(asset > 0 ? [["Asset movement (ETH/ERC-20 transfer)", asset]] : []),
         ["EIP-8182 intrinsic (tree, hashing, writes, dispatch)",         intrinsic],
       ], subtotal: ["Mandatory subtotal", mandatory] },
@@ -327,10 +316,12 @@ console.log("─────");
 console.log("- 'Total' is the full all-in gas a real user pays: tx base intrinsic");
 console.log("  (21,000) + calldata gas (EIP-2028: 16/non-zero, 4/zero) + EVM");
 console.log("  execution gas (gasleft delta around the pool call).");
-console.log("- Pool proof verify is charged at the EIP-8182 §5.5 precompile gas");
-console.log(`  (${POOL_VERIFY_SPEC_GAS.toLocaleString("en-US")}). The Solidity Groth16 verifier we etch as a stand-in`);
-console.log("  measures ~335K; the spec number is set with a small discount to");
-console.log("  reflect that native code can fold IC-sum work more tightly than EVM.");
+console.log("- Pool proof verify is the inline EIP-8182 §5.5 path: 256-byte");
+console.log("  calldata decode + 21-field repack + warm self-staticcall to the");
+console.log("  inherited verifyProof. Measured via");
+console.log("  ShieldedPoolStepNineHarness.exposeVerifyPoolProof, which adds a");
+console.log("  small external-call wrapper overhead (<0.2% of the bucket) on top");
+console.log("  of the literal internal step-9 path that runs inside transact.");
 console.log("- For transact rows the headline models a Groth16 auth verifier (same");
 console.log("  proof system as the pool, 2 PI) — what a gas-conscious implementer");
 console.log("  would deploy. Per-op 'For comparison' line shows the cost with the");

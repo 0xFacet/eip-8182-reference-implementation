@@ -6,8 +6,6 @@ import {Vm} from "forge-std/Vm.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {ShieldedPool} from "../src/ShieldedPool.sol";
 import {InstallSystemContractsBase} from "../script/InstallSystemContracts.s.sol";
-import {MockPoolPrecompile} from "../src/MockPoolPrecompile.sol";
-import {PoolGroth16Verifier} from "../src/PoolGroth16Verifier.sol";
 import {RealAuthVerifier} from "../src/auth/RealAuthVerifier.sol";
 import {HonkVerifier} from "../src/auth/HonkRealAuthVerifier.sol";
 import {DemoAuthVerifier} from "../src/auth/DemoAuthVerifier.sol";
@@ -16,6 +14,7 @@ import {IAuthVerifier} from "../src/interfaces/IAuthVerifier.sol";
 import {PoseidonFieldLib} from "../src/libraries/PoseidonFieldLib.sol";
 import {Poseidon2Sponge} from "../src/libraries/Poseidon2Sponge.sol";
 import {MockERC20} from "./MockERC20.sol";
+import {ShieldedPoolStepNineHarness} from "./ShieldedPoolStepNineHarness.sol";
 
 /// @notice On-chain gas benchmarks for EIP-8182. Each `test_bench_*` function
 ///         measures total gas of a user-facing operation in a fresh-state /
@@ -25,11 +24,13 @@ import {MockERC20} from "./MockERC20.sol";
 ///         warming the prior measurements caused.
 ///
 ///         Buckets:
-///           - Pool proof verify (mocked): the EIP-8182 spec defines a native
-///             precompile at 0x...30. We etch `MockPoolPrecompile` (Solidity
-///             Groth16 verifier) at that address. The number reported here
-///             is therefore an upper bound; a native precompile would charge
-///             a fixed gas amount per the spec's gas schedule (TBD).
+///           - Pool proof verify (inline): the EIP-8182 spec embeds the pool
+///             Groth16 verifier in the system contract bytecode (Section 5.5).
+///             The number reported here is the step-9 inline path:
+///             256-byte calldata decode + 21-field repack + warm self-
+///             staticcall to verifyProof. We expose this via
+///             ShieldedPoolStepNineHarness for direct measurement, separate
+///             from the raw pairing-only `verifyProof` cost.
 ///           - Auth proof verify: implementer's choice. We bench Honk
 ///             (UltraHonk via bb's emitted Solidity verifier). Other auth
 ///             circuits — Groth16, ECDSA-only — produce different numbers.
@@ -48,9 +49,6 @@ import {MockERC20} from "./MockERC20.sol";
 ///         tests are gated behind the `BENCH_WITHDRAW` env var.
 contract BenchTest is Test, InstallSystemContractsBase {
     using stdJson for string;
-
-    address internal constant PROOF_VERIFY_PRECOMPILE_ADDRESS =
-        0x0000000000000000000000000000000000000030;
 
     // Pinned to match scripts/noir/gen_honk_pool_witness_input.js:
     address internal constant SENDER     = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
@@ -74,8 +72,6 @@ contract BenchTest is Test, InstallSystemContractsBase {
     ShieldedPool internal pool;
     RealAuthVerifier internal authVerifierImpl;
     HonkVerifier internal honkVerifier;
-    PoolGroth16Verifier internal poolGroth16;
-    MockPoolPrecompile internal poolPrecompile;
     MockERC20 internal mockTokenImpl;
 
     // Groth16 auth verifier used to model the gas a gas-optimized
@@ -88,10 +84,13 @@ contract BenchTest is Test, InstallSystemContractsBase {
         vm.warp(1735689600 - 600); // witness pins validUntilSeconds = 1735689600
 
         install();
+        // After install() the runtime at POOL_ADDRESS contains the inlined
+        // Groth16 verifier. Etch ShieldedPoolStepNineHarness (a strict
+        // superset that adds `exposeVerifyPoolProof`) so we can measure the
+        // step-9 inline verify path directly. transact() is unchanged.
+        vm.etch(POOL_ADDRESS, type(ShieldedPoolStepNineHarness).runtimeCode);
         pool = ShieldedPool(POOL_ADDRESS);
 
-        poolGroth16 = new PoolGroth16Verifier();
-        poolPrecompile = new MockPoolPrecompile(poolGroth16);
         honkVerifier = new HonkVerifier();
         mockTokenImpl = new MockERC20();
 
@@ -102,7 +101,6 @@ contract BenchTest is Test, InstallSystemContractsBase {
         // Auth wrapper is sized once a session is read (its constructor takes
         // the proof length); transact benches re-deploy after reading their
         // session JSON. The non-transact benches don't dispatch to it.
-        vm.etch(PROOF_VERIFY_PRECOMPILE_ADDRESS, address(poolPrecompile).code);
         vm.etch(TOKEN_ADDR, address(mockTokenImpl).code);
     }
 
@@ -207,7 +205,7 @@ contract BenchTest is Test, InstallSystemContractsBase {
     function test_bench_Transfer() public {
         if (!_sessionExists("build/integration_honk/session.json")) {
             _writeBenchSkipped("transfer", "build/integration_honk/session.json missing");
-            return;
+            vm.skip(true, "build/integration_honk/session.json missing");
         }
         _runTransactBench("transfer", "build/integration_honk/session.json", AssetMode.NONE);
     }
@@ -215,7 +213,7 @@ contract BenchTest is Test, InstallSystemContractsBase {
     function test_bench_WithdrawETH() public {
         if (!_sessionExists("build/integration_honk/withdraw_eth_session.json")) {
             _writeBenchSkipped("withdraw_eth", "build/integration_honk/withdraw_eth_session.json missing");
-            return;
+            vm.skip(true, "build/integration_honk/withdraw_eth_session.json missing");
         }
         _runTransactBench("withdraw_eth", "build/integration_honk/withdraw_eth_session.json", AssetMode.ETH);
     }
@@ -226,7 +224,7 @@ contract BenchTest is Test, InstallSystemContractsBase {
                 "withdraw_erc20",
                 "build/integration_honk/withdraw_erc20_session.json missing"
             );
-            return;
+            vm.skip(true, "build/integration_honk/withdraw_erc20_session.json missing");
         }
         _runTransactBench(
             "withdraw_erc20",
@@ -245,26 +243,32 @@ contract BenchTest is Test, InstallSystemContractsBase {
 
         // ---- Total (measured first, addresses cooled) ----
         // Setup (registerUser × 3, deposit × 2, registerAuthPolicy) warmed the
-        // verifier and token addresses; in production, those would be cold
-        // when the transact tx starts. Re-cool them so the total reflects the
-        // user-facing cost. Pool address is auto-warm as the call target
-        // (matches production). Storage slots warmed by setup remain warm —
-        // that residual bias is on the order of 10K gas (~0.2%) and not
-        // surfaced separately.
-        vm.cool(PROOF_VERIFY_PRECOMPILE_ADDRESS);
+        // auth-verifier and token addresses; in production, those would be
+        // cold when the transact tx starts. Re-cool them so the total
+        // reflects the user-facing cost. POOL_ADDRESS is auto-warm as the
+        // call target (matches production). The inlined pool verifier lives
+        // in POOL_ADDRESS's bytecode, so no separate verifier-account warming
+        // applies. Storage slots warmed by setup remain warm — that residual
+        // bias is on the order of 10K gas (~0.2%) and not surfaced
+        // separately.
         vm.cool(AUTH_VERIFIER_ADDR);
         vm.cool(TOKEN_ADDR);
         uint256 total = _runTransact(ctx);
 
         // ---- Bucket measurements: revert + cool the touched addresses ----
         vm.revertToState(snap);
-        vm.cool(POOL_ADDRESS);
-        vm.cool(PROOF_VERIFY_PRECOMPILE_ADDRESS);
         vm.cool(AUTH_VERIFIER_ADDR);
         vm.cool(TOKEN_ADDR);
 
+        // Step-9 inline verify (warm) — matches the path inside transact.
+        // Inside transact, address(this) is already warm (it's the executing
+        // contract), so we do NOT cool POOL_ADDRESS here. A warm-up call
+        // first makes the touch unambiguous; the measured call then sees the
+        // warm-account access cost (~100 gas), not the cold ~2,600.
+        ShieldedPoolStepNineHarness(POOL_ADDRESS).exposeVerifyPoolProof(
+            ctx.poolProof, ctx.pi
+        );
         uint256 poolVerifyGas = _measurePoolVerify(ctx);
-        vm.cool(PROOF_VERIFY_PRECOMPILE_ADDRESS);
 
         uint256 authVerifyGas = _measureAuthVerify(ctx);
         vm.cool(AUTH_VERIFIER_ADDR);
@@ -310,7 +314,7 @@ contract BenchTest is Test, InstallSystemContractsBase {
         keys[0]  = "exec_gas";                     vals[0]  = execGas;
         keys[1]  = "tx_calldata_gas_honk";         vals[1]  = _transactCalldataGas(ctx, ctx.authProof);
         keys[2]  = "tx_calldata_gas_groth16";      vals[2]  = _transactCalldataGas(ctx, g16AuthProof);
-        keys[3]  = "pool_verify_mocked";           vals[3]  = poolVerifyGas;
+        keys[3]  = "pool_verify_via_harness";      vals[3]  = poolVerifyGas;
         keys[4]  = "auth_verify_honk";             vals[4]  = authVerifyHonkGas;
         keys[5]  = "auth_verify_groth16";          vals[5]  = authVerifyGroth16Gas;
         keys[6]  = "asset_movement";               vals[6]  = assetGas;
@@ -487,12 +491,19 @@ contract BenchTest is Test, InstallSystemContractsBase {
     }
 
     function _measurePoolVerify(TransactCtx memory ctx) internal view returns (uint256) {
-        bytes memory cd = abi.encode(ctx.poolProof, ctx.pi);
+        // Step-9 path measured via ShieldedPoolStepNineHarness etched at
+        // POOL_ADDRESS in setUp(). The measurement includes the harness's
+        // external-call dispatcher overhead (CALL opcode + selector dispatch
+        // + ABI argument decode), which the real path inside `transact`
+        // doesn't pay (it reaches `_verifyPoolProof` via an internal call).
+        // The wrapper overhead is bounded at a few hundred gas — under 0.2%
+        // of the ~335K total — so this is reported as "via harness" rather
+        // than literal step-9 to be honest about what's measured. POOL_ADDRESS
+        // is warmed before this call so cold-account access doesn't compound.
+        ShieldedPoolStepNineHarness harness = ShieldedPoolStepNineHarness(POOL_ADDRESS);
         uint256 g0 = gasleft();
-        (bool ok, bytes memory ret) = PROOF_VERIFY_PRECOMPILE_ADDRESS.staticcall(cd);
-        uint256 used = g0 - gasleft();
-        require(ok && ret.length == 32 && abi.decode(ret, (uint256)) == 1, "bench: pool verify fail");
-        return used;
+        harness.exposeVerifyPoolProof(ctx.poolProof, ctx.pi);
+        return g0 - gasleft();
     }
 
     function _measureAuthVerify(TransactCtx memory ctx) internal view returns (uint256) {

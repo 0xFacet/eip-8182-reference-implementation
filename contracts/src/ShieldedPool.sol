@@ -4,13 +4,18 @@ pragma solidity ^0.8.28;
 import {ERC20AssetLib} from "./libraries/ERC20AssetLib.sol";
 import {PoseidonFieldLib} from "./libraries/PoseidonFieldLib.sol";
 import {IAuthVerifier} from "./interfaces/IAuthVerifier.sol";
+import {PoolGroth16Verifier} from "./PoolGroth16Verifier.sol";
 
 /// @title  EIP-8182 Shielded Pool
 /// @notice Reference implementation matching the Groth16 + split-proof spec.
 /// @dev    Installed at SHIELDED_POOL_ADDRESS via the activation-fork state
 ///         dump (Section 5.1). Not deployed via CREATE/CREATE2, so EIP-170 does
-///         not constrain bytecode size.
-contract ShieldedPool {
+///         not constrain bytecode size. The pool-proof verification key is
+///         embedded in the bytecode via inheritance from PoolGroth16Verifier;
+///         see Section 5.5 for the inline-verification path. The inherited
+///         `verifyProof` external entry point is a pure read-only helper, not
+///         part of the normative protocol surface.
+contract ShieldedPool is PoolGroth16Verifier {
     // -------------------------------- Constants --------------------------------
 
     uint256 internal constant MAX_INTENT_LIFETIME = 86400;
@@ -26,9 +31,6 @@ contract ShieldedPool {
     uint256 internal constant MAX_AMOUNT_VALUE = type(uint248).max;
     uint256 internal constant MAX_VALID_UNTIL_SECONDS = type(uint32).max;
     uint256 internal constant MAX_EXECUTION_CHAIN_ID = type(uint32).max;
-
-    address internal constant PROOF_VERIFY_PRECOMPILE_ADDRESS =
-        0x0000000000000000000000000000000000000030;
 
     // -------------------------------- Types --------------------------------
 
@@ -272,8 +274,9 @@ contract ShieldedPool {
         require(publicInputs.nullifier0 != publicInputs.nullifier1, DuplicateNullifier());
 
         // Step 8: range checks. Canonical-field checks for the verifier are
-        // handled inside the precompile, but address/amount aliasing is an
-        // EVM-side concern and MUST be enforced here too.
+        // handled inside the inlined Groth16 verifier (Section 5.5), but
+        // address/amount aliasing is an EVM-side concern and MUST be enforced
+        // here too.
         require(publicInputs.publicAmountOut <= MAX_AMOUNT_VALUE, AmountOutOfRange());
         require(publicInputs.publicRecipientAddress <= MAX_ADDRESS_VALUE, AddressOutOfRange());
         require(publicInputs.publicTokenAddress <= MAX_ADDRESS_VALUE, AddressOutOfRange());
@@ -282,7 +285,7 @@ contract ShieldedPool {
         require(publicInputs.validUntilSeconds <= MAX_VALID_UNTIL_SECONDS, IntentExpired());
         require(publicInputs.executionChainId <= MAX_EXECUTION_CHAIN_ID, WrongChainId());
 
-        // Step 9: pool proof via precompile.
+        // Step 9: pool proof verified inline against the embedded VK.
         _verifyPoolProof(poolProof, publicInputs);
 
         // Step 10: auth proof via authVerifier staticcall.
@@ -387,13 +390,68 @@ contract ShieldedPool {
         );
     }
 
-    function _verifyPoolProof(bytes calldata proof, PublicInputs calldata publicInputs) private view {
-        (bool success, bytes memory ret) =
-            PROOF_VERIFY_PRECOMPILE_ADDRESS.staticcall(abi.encode(proof, publicInputs));
+    /// @notice Section 5.5 — verifies the 256-byte Groth16 BN254 pool proof
+    ///         against the 21-field public-input vector using the verification
+    ///         key embedded in this contract's bytecode (inherited from
+    ///         PoolGroth16Verifier). Reverts on any failure mode: malformed
+    ///         proof encoding, non-canonical public input, off-curve / wrong-
+    ///         subgroup point, or pairing-equation failure.
+    /// @dev    Uses self-staticcall rather than a normal internal call because
+    ///         the snarkjs-generated `verifyProof` body returns via raw
+    ///         `assembly { return(0, 0x20) }` — a direct internal call would
+    ///         terminate the entire `transact` call frame instead of returning
+    ///         to step 10.
+    function _verifyPoolProof(bytes calldata proof, PublicInputs calldata publicInputs)
+        internal
+        view
+        virtual
+    {
+        require(proof.length == 256, PoolProofRejected());
+
+        // Split the 256-byte proof into Groth16 (A, B, C) elements. The byte
+        // layout is the EIP-8182 / EIP-197 canonical form documented in
+        // Section 5.5: A (64) || B (128, x.c1||x.c0||y.c1||y.c0) || C (64).
+        uint256[2] memory pA = [_proofWord(proof, 0), _proofWord(proof, 32)];
+        uint256[2][2] memory pB = [
+            [_proofWord(proof, 64),  _proofWord(proof, 96)],
+            [_proofWord(proof, 128), _proofWord(proof, 160)]
+        ];
+        uint256[2] memory pC = [_proofWord(proof, 192), _proofWord(proof, 224)];
+
+        uint256[21] memory pub;
+        pub[0]  = publicInputs.noteCommitmentRoot;
+        pub[1]  = publicInputs.nullifier0;
+        pub[2]  = publicInputs.nullifier1;
+        pub[3]  = publicInputs.noteBodyCommitment0;
+        pub[4]  = publicInputs.noteBodyCommitment1;
+        pub[5]  = publicInputs.noteBodyCommitment2;
+        pub[6]  = publicInputs.publicAmountOut;
+        pub[7]  = publicInputs.publicRecipientAddress;
+        pub[8]  = publicInputs.publicTokenAddress;
+        pub[9]  = publicInputs.intentReplayId;
+        pub[10] = publicInputs.registryRoot;
+        pub[11] = publicInputs.validUntilSeconds;
+        pub[12] = publicInputs.executionChainId;
+        pub[13] = publicInputs.authPolicyRegistrationRoot;
+        pub[14] = publicInputs.authPolicyRevocationRoot;
+        pub[15] = publicInputs.outputNoteDataHash0;
+        pub[16] = publicInputs.outputNoteDataHash1;
+        pub[17] = publicInputs.outputNoteDataHash2;
+        pub[18] = publicInputs.authVerifier;
+        pub[19] = publicInputs.blindedAuthCommitment;
+        pub[20] = publicInputs.transactionIntentDigest;
+
+        (bool success, bytes memory ret) = address(this).staticcall(
+            abi.encodeCall(this.verifyProof, (pA, pB, pC, pub))
+        );
         require(
             success && ret.length == 32 && abi.decode(ret, (uint256)) == 1,
             PoolProofRejected()
         );
+    }
+
+    function _proofWord(bytes calldata src, uint256 offset) private pure returns (uint256 w) {
+        assembly { w := calldataload(add(src.offset, offset)) }
     }
 
     function _verifyAuthProof(

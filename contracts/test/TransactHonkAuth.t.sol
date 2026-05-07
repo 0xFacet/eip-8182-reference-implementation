@@ -2,11 +2,10 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {ShieldedPool} from "../src/ShieldedPool.sol";
 import {InstallSystemContractsBase} from "../script/InstallSystemContracts.s.sol";
-import {MockPoolPrecompile} from "../src/MockPoolPrecompile.sol";
-import {PoolGroth16Verifier} from "../src/PoolGroth16Verifier.sol";
 import {RealAuthVerifier} from "../src/auth/RealAuthVerifier.sol";
 import {HonkVerifier} from "../src/auth/HonkRealAuthVerifier.sol";
 import {PoseidonFieldLib} from "../src/libraries/PoseidonFieldLib.sol";
@@ -14,17 +13,14 @@ import {Poseidon2Sponge} from "../src/libraries/Poseidon2Sponge.sol";
 import {MockERC20} from "./MockERC20.sol";
 
 /// @notice End-to-end transact() against the realistic Honk auth circuit:
-///         pool proof (Groth16/BN254, mock precompile) + auth proof
-///         (UltraHonk via bb, deployed Solidity verifier). Mirrors
-///         TransactDemoAuth.t.sol's structure but with RealAuthVerifier
-///         instead of DemoAuthVerifier. Reads
+///         pool proof (Groth16/BN254, inline-verified by the system contract)
+///         + auth proof (UltraHonk via bb, deployed Solidity verifier).
+///         Mirrors TransactDemoAuth.t.sol's structure but with
+///         RealAuthVerifier instead of DemoAuthVerifier. Reads
 ///         build/integration_honk/session.json (produced by
 ///         scripts/integration/build_honk_session.js).
 contract TransactHonkAuthTest is Test, InstallSystemContractsBase {
     using stdJson for string;
-
-    address internal constant PROOF_VERIFY_PRECOMPILE_ADDRESS =
-        0x0000000000000000000000000000000000000030;
 
     // --- Pinned witness identities (must match scripts/noir/gen_honk_pool_witness_input.js) ---
     // Sender == authorizing address == pubkey-derived ethereum address of the
@@ -59,11 +55,10 @@ contract TransactHonkAuthTest is Test, InstallSystemContractsBase {
     ShieldedPool internal pool;
     RealAuthVerifier internal authVerifierImpl;
     HonkVerifier internal honkVerifier;
-    PoolGroth16Verifier internal poolGroth16;
-    MockPoolPrecompile internal poolPrecompile;
     MockERC20 internal mockTokenImpl;
 
     string internal session;
+    bool internal _skipMissingSession;
 
     function setUp() public {
         vm.chainId(1);
@@ -73,8 +68,15 @@ contract TransactHonkAuthTest is Test, InstallSystemContractsBase {
         install();
         pool = ShieldedPool(POOL_ADDRESS);
 
-        poolGroth16 = new PoolGroth16Verifier();
-        poolPrecompile = new MockPoolPrecompile(poolGroth16);
+        // Skip setup if the Honk session JSON hasn't been generated. The
+        // file is produced by scripts/integration/build_honk_session.js and
+        // requires the Noir+bb toolchain; gating here keeps `forge test`
+        // green out-of-the-box even when those tools aren't installed.
+        if (!_fileExists("build/integration_honk/session.json")) {
+            _skipMissingSession = true;
+            return;
+        }
+
         honkVerifier = new HonkVerifier();
 
         // Read session before constructing the wrapper -- need the proof length.
@@ -85,12 +87,25 @@ contract TransactHonkAuthTest is Test, InstallSystemContractsBase {
 
         mockTokenImpl = new MockERC20();
 
-        vm.etch(PROOF_VERIFY_PRECOMPILE_ADDRESS, address(poolPrecompile).code);
         vm.etch(AUTH_VERIFIER_ADDR, address(authVerifierImpl).code);
         vm.etch(TOKEN_ADDR, address(mockTokenImpl).code);
     }
 
+    function _fileExists(string memory path) internal view returns (bool) {
+        try vm.fsMetadata(path) returns (Vm.FsMetadata memory) {
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
     function testTransactHonkAuthSucceeds() public {
+        if (_skipMissingSession) {
+            vm.skip(
+                true,
+                "build/integration_honk/session.json missing; run scripts/integration/build_honk_session.js"
+            );
+        }
         _register(SENDER,     SENDER_NULLIFIER_KEY, SENDER_SECRET_SEED);
         _register(RECIPIENT0, R0_NULLIFIER_KEY,     R0_SECRET_SEED);
         _register(RECIPIENT2, R2_NULLIFIER_KEY,     R2_SECRET_SEED);

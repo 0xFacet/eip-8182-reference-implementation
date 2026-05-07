@@ -5,8 +5,6 @@ import {Test} from "forge-std/Test.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {ShieldedPool} from "../src/ShieldedPool.sol";
 import {InstallSystemContractsBase} from "../script/InstallSystemContracts.s.sol";
-import {MockPoolPrecompile} from "../src/MockPoolPrecompile.sol";
-import {PoolGroth16Verifier} from "../src/PoolGroth16Verifier.sol";
 import {AuthDemoGroth16Verifier} from "../src/AuthDemoGroth16Verifier.sol";
 import {DemoAuthVerifier} from "../src/auth/DemoAuthVerifier.sol";
 import {PoseidonFieldLib} from "../src/libraries/PoseidonFieldLib.sol";
@@ -21,9 +19,6 @@ import {MockERC20} from "./MockERC20.sol";
 ///         build/integration/session.json and asserts the receipt.
 contract TransactDemoAuthTest is Test, InstallSystemContractsBase {
     using stdJson for string;
-
-    address internal constant PROOF_VERIFY_PRECOMPILE_ADDRESS =
-        0x0000000000000000000000000000000000000030;
 
     // Hard-coded witness identities — must match
     // scripts/witness/gen_pool_witness_input.js.
@@ -51,8 +46,6 @@ contract TransactDemoAuthTest is Test, InstallSystemContractsBase {
     ShieldedPool internal pool;
     DemoAuthVerifier internal authVerifierImpl;
     AuthDemoGroth16Verifier internal authGroth16;
-    PoolGroth16Verifier internal poolGroth16;
-    MockPoolPrecompile internal poolPrecompile;
     MockERC20 internal mockTokenImpl;
 
     string internal session;
@@ -66,16 +59,9 @@ contract TransactDemoAuthTest is Test, InstallSystemContractsBase {
         install();
         pool = ShieldedPool(POOL_ADDRESS);
 
-        poolGroth16 = new PoolGroth16Verifier();
-        poolPrecompile = new MockPoolPrecompile(poolGroth16);
         authGroth16 = new AuthDemoGroth16Verifier();
         authVerifierImpl = new DemoAuthVerifier(authGroth16);
         mockTokenImpl = new MockERC20();
-
-        // Etch the precompile bytecode at the canonical address. The baked
-        // immutable in MockPoolPrecompile keeps pointing at the deployed
-        // verifier instance after etching.
-        vm.etch(PROOF_VERIFY_PRECOMPILE_ADDRESS, address(poolPrecompile).code);
 
         // Etch DemoAuthVerifier at the witness-baked authVerifier address so
         // that publicInputs.authVerifier resolves to a working verifier.

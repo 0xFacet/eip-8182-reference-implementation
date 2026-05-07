@@ -6,6 +6,7 @@ import {ShieldedPool} from "../src/ShieldedPool.sol";
 import {InstallSystemContractsBase} from "../script/InstallSystemContracts.s.sol";
 import {PoseidonFieldLib} from "../src/libraries/PoseidonFieldLib.sol";
 import {IAuthVerifier} from "../src/interfaces/IAuthVerifier.sol";
+import {ShieldedPoolAcceptAllHarness} from "./ShieldedPoolAcceptAllHarness.sol";
 
 contract _AcceptAllAuth is IAuthVerifier {
     function verifyAuth(bytes calldata, bytes calldata) external pure override returns (bool) {
@@ -13,25 +14,19 @@ contract _AcceptAllAuth is IAuthVerifier {
     }
 }
 
-contract _AcceptAllPool {
-    fallback(bytes calldata) external returns (bytes memory) {
-        return abi.encode(uint256(1));
-    }
-}
-
 contract GasBreakdownTest is Test, InstallSystemContractsBase {
-    address internal constant PROOF_VERIFY_PRECOMPILE_ADDRESS =
-        0x0000000000000000000000000000000000000030;
-
     ShieldedPool internal pool;
     address internal authVerifierAddr;
 
     function setUp() public {
         install();
+        // Replace the production ShieldedPool runtime at POOL_ADDRESS with the
+        // accept-all harness, so `_verifyPoolProof` is a no-op and we can
+        // measure gas without supplying a real Groth16 proof. State is
+        // preserved because vm.etch only swaps code.
+        vm.etch(POOL_ADDRESS, type(ShieldedPoolAcceptAllHarness).runtimeCode);
         pool = ShieldedPool(POOL_ADDRESS);
 
-        _AcceptAllPool poolMock = new _AcceptAllPool();
-        vm.etch(PROOF_VERIFY_PRECOMPILE_ADDRESS, address(poolMock).code);
         _AcceptAllAuth authMock = new _AcceptAllAuth();
         authVerifierAddr = address(authMock);
     }

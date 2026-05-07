@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Convert snarkjs Groth16 verification key (pool_vkey.json) to canonical
-// EIP-196/197 byte layout used by the EIP-8182 PROOF_VERIFY_PRECOMPILE.
+// EIP-196/197 byte layout. This `.bin` is the source-of-truth artifact the
+// EIP-8182 system contract bytecode must embed (Section 5.5); see
+// `pool_vk.sha256` for the install-time integrity check.
 //
 // Layout (1856 bytes for the 21-public-input pool circuit):
 //   alpha (G1, 64 B)               : x (32) || y (32)

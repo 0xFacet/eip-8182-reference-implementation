@@ -50,13 +50,14 @@ fi
 echo "==> export verification key"
 "$SNARKJS" zkey export verificationkey "$OUT/pool_final.zkey" "$OUT/pool_vkey.json"
 
-# 5. Convert to canonical bin layout consumed by the precompile.
+# 5. Convert to canonical bin layout — source-of-truth artifact the system
+# contract bytecode embeds (Section 5.5).
 echo "==> writing canonical pool_vk.bin"
 node "$ROOT/scripts/assets/vk_to_bin.js" "$OUT/pool_vkey.json" "$OUT/pool_vk.bin"
 shasum -a 256 "$OUT/pool_vk.bin" | awk '{print $1}' > "$OUT/pool_vk.sha256"
 
-# 6. Export Solidity verifier and rename the snarkjs default symbol so
-# MockPoolPrecompile's import resolves.
+# 6. Export Solidity verifier and rename the snarkjs default symbol to match
+# the import name used by ShieldedPool's inheritance.
 echo "==> export Solidity verifier"
 "$SNARKJS" zkey export solidityverifier "$OUT/pool_final.zkey" "$VERIFIER_OUT"
 sed -i.bak 's/^contract Groth16Verifier {/contract PoolGroth16Verifier {/' "$VERIFIER_OUT"
