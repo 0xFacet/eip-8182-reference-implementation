@@ -70,13 +70,12 @@ const sessions = {
   withdraw_erc20: readSession("withdraw_erc20"),
 };
 const benches = {
-  register_user:        readBench("register_user"),
-  register_auth_policy: readBench("register_auth_policy"),
-  deposit_eth:          readBench("deposit_eth"),
-  deposit_erc20:        readBench("deposit_erc20"),
-  transfer:             readBench("transfer"),
-  withdraw_eth:         readBench("withdraw_eth"),
-  withdraw_erc20:       readBench("withdraw_erc20"),
+  set_auth_policy: readBench("set_auth_policy"),
+  deposit_eth:     readBench("deposit_eth"),
+  deposit_erc20:   readBench("deposit_erc20"),
+  transfer:        readBench("transfer"),
+  withdraw_eth:    readBench("withdraw_eth"),
+  withdraw_erc20:  readBench("withdraw_erc20"),
 };
 
 const TX_BASE_INTRINSIC = 21000;
@@ -97,14 +96,20 @@ function fullTotal(b) {
   return TX_BASE_INTRINSIC + (b.tx_calldata_gas || 0) + b.exec_gas;
 }
 
+// Prefer the "fastest realistic" Groth16 demo timings (rapidsnark + Groth16
+// auth_demo, written by scripts/integration/build_session.js) over the Honk
+// session's slower numbers. Prove time per circuit is constant per mode, so
+// the transfer-mode demo timing applies to all transact rows.
+const fastTimings = readJsonOrNull(path.join(ROOT, "build/integration/timings.json"));
+
 function summaryRow(label, sessionKey, benchKey) {
   const s = sessions[sessionKey];
   const b = benches[benchKey];
   if (b && b.skipped) {
     return [label, "skipped", "", "", ""];
   }
-  const tp = s?.timings?.pool_prove_ms;
-  const ta = s?.timings?.auth_prove_ms;
+  const tp = fastTimings?.pool_prove_ms ?? s?.timings?.pool_prove_ms;
+  const ta = fastTimings?.auth_prove_ms ?? s?.timings?.auth_prove_ms;
   const e2e = (tp != null && ta != null) ? tp + ta : null;
   return [label, fmtMs(tp), fmtMs(ta), fmtMs(e2e), fmtGas(fullTotal(b))];
 }
@@ -118,8 +123,7 @@ function nonProveRow(label, benchKey) {
 
 const header = ["operation", "pool prove", "auth prove", "wallet e2e", "on-chain gas"];
 const rows = [
-  nonProveRow("register user",       "register_user"),
-  nonProveRow("register auth policy","register_auth_policy"),
+  nonProveRow("set auth policy",     "set_auth_policy"),
   nonProveRow("deposit (ETH)",       "deposit_eth"),
   nonProveRow("deposit (ERC-20)",    "deposit_erc20"),
   summaryRow ("transfer",            "transfer",       "transfer"),
@@ -130,10 +134,17 @@ const rows = [
 const widths = header.map((_, i) => Math.max(header[i].length,
   ...rows.map(r => String(r[i]).length)));
 
+const proverName = fastTimings?.prover === "rapidsnark"
+  ? "rapidsnark (native)"
+  : "snarkjs (WASM)";
+const authCircuit = fastTimings?.auth_circuit === "groth16_demo"
+  ? "Groth16/BN254 demo (snarkjs / rapidsnark)"
+  : "UltraHonk/BN254 (Noir + bb)";
+
 console.log();
 console.log("EIP-8182 benchmarks");
-console.log(`Pool circuit:  Groth16/BN254 (snarkjs WASM)`);
-console.log(`Auth circuit:  UltraHonk/BN254 (Noir + bb)`);
+console.log(`Pool circuit:  Groth16/BN254, ${proverName}`);
+console.log(`Auth circuit:  ${authCircuit}`);
 console.log(`CPU:           ${os.cpus()[0]?.model}, ${os.cpus().length} cores, ${(os.totalmem() / 1e9).toFixed(0)} GB`);
 console.log(`Generated:     ${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC`);
 console.log();
@@ -232,17 +243,17 @@ function depositBuckets(b) {
   };
 }
 
-function registerBuckets(b) {
+function setAuthPolicyBuckets(b) {
   if (!b || b.skipped) return null;
   const execGas    = b.exec_gas        || 0;
   const txCalldata = b.tx_calldata_gas || 0;
   const total      = TX_BASE_INTRINSIC + txCalldata + execGas;
   return {
     sections: [
-      { title: "Mandatory (everything; register has no auth choice)", rows: [
+      { title: "Mandatory (everything; setAuthPolicy has no auth choice)", rows: [
         ["Tx base intrinsic (Berlin)",                21000],
         ["Calldata (selector + args)",                txCalldata],
-        ["EIP-8182 intrinsic (tree insert + writes)", execGas],
+        ["EIP-8182 intrinsic (tree write + writes)",  execGas],
       ]},
     ],
     total,
@@ -302,8 +313,7 @@ function printBuckets(label, breakdown) {
 console.log();
 console.log("Gas breakdown by operation");
 console.log("══════════════════════════");
-printBuckets("register user",        registerBuckets(benches.register_user));
-printBuckets("register auth policy", registerBuckets(benches.register_auth_policy));
+printBuckets("set auth policy",      setAuthPolicyBuckets(benches.set_auth_policy));
 printBuckets("deposit (ETH)",        depositBuckets(benches.deposit_eth));
 printBuckets("deposit (ERC-20)",     depositBuckets(benches.deposit_erc20));
 printBuckets("transfer",             transactBuckets(benches.transfer));
@@ -317,7 +327,7 @@ console.log("- 'Total' is the full all-in gas a real user pays: tx base intrinsi
 console.log("  (21,000) + calldata gas (EIP-2028: 16/non-zero, 4/zero) + EVM");
 console.log("  execution gas (gasleft delta around the pool call).");
 console.log("- Pool proof verify is the inline EIP-8182 §5.5 path: 256-byte");
-console.log("  calldata decode + 21-field repack + warm self-staticcall to the");
+console.log("  calldata decode + 19-field repack + warm self-staticcall to the");
 console.log("  inherited verifyProof. Measured via");
 console.log("  ShieldedPoolStepNineHarness.exposeVerifyPoolProof, which adds a");
 console.log("  small external-call wrapper overhead (<0.2% of the bucket) on top");
@@ -327,7 +337,19 @@ console.log("  proof system as the pool, 2 PI) — what a gas-conscious implemen
 console.log("  would deploy. Per-op 'For comparison' line shows the cost with the");
 console.log("  Noir+UltraHonk circuit (~10× more verify gas, ~38× more calldata)");
 console.log("  — that's what the prove timings here actually measure.");
-console.log("- Pool prove time is snarkjs WASM; rapidsnark is ~10x faster.");
+console.log(`- Prove times use ${proverName} for Groth16. Witness gen is`);
+console.log("  always WASM (snarkjs.wtns.calculate, ~50ms pool / ~10ms auth on");
+console.log("  M-class Apple Silicon); the prover binary handles only the");
+console.log("  proof step. Set RAPIDSNARK_PROVER=/path/to/prover before");
+console.log("  scripts/bench/run.sh to switch in the native prover.");
+console.log("- These times are wallet-side, on the host CPU above. Mobile");
+console.log("  projection: flagship phone is ~3-4x slower (pool ~300-400ms,");
+console.log("  auth ~30ms); mid-range ~6-8x slower; budget ~10-15x slower.");
+console.log("  Pool prove dominates on every device class.");
+console.log("- Headline assumes the wallet ships rapidsnark + a Groth16 auth.");
+console.log("  Wallets shipping snarkjs WASM see ~10x slower prove; wallets");
+console.log("  shipping UltraHonk auth add ~1s prove on host, multiples more");
+console.log("  on phone (auth prove dominates instead of pool).");
 console.log("- Single-shot timings; expect ±10-20% variance.");
 const skipped = ["transfer", "withdraw_eth", "withdraw_erc20"]
   .filter(k => benches[k] && benches[k].skipped);

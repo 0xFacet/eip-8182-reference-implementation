@@ -14,9 +14,16 @@ cd "$(dirname "$0")/../.."
 mkdir -p build/bench/raw
 
 for mode in transfer withdraw_eth withdraw_erc20; do
-  echo "==> Building $mode session (pool + auth prove)"
+  echo "==> Building $mode session (pool + Honk auth)"
   node scripts/integration/build_honk_session.js --mode="$mode"
 done
+
+# Build the Groth16-demo session too. The bench's gas measurements pull the
+# Groth16 auth proof from this file, and the render script reads its timings
+# (which use rapidsnark when RAPIDSNARK_PROVER is set) as the "fastest
+# realistic" prove time for the table.
+echo "==> Building Groth16 demo session (transfer mode)"
+node scripts/integration/build_session.js
 
 echo "==> Running gas benches via forge"
 forge test --match-contract BenchTest --match-test "test_bench_" >/dev/null

@@ -6,7 +6,7 @@
 //   pool_verify_noncanonical_field.json — first publicInput set to p (>= p), MUST NOT verify
 //
 // Each vector contains the typed (pA, pB, pC, pubSignals) form consumed by
-// ShieldedPool.verifyProof(uint[2], uint[2][2], uint[2], uint[21]) and the
+// ShieldedPool.verifyProof(uint[2], uint[2][2], uint[2], uint[19]) and the
 // expected boolean result. Section 5.5 specifies inline verification using the
 // VK embedded in the system contract bytecode.
 
@@ -38,8 +38,8 @@ const proof = codec.bytesToSnarkjsProof(
 );
 const publics = session.pool.publicSignals;
 
-if (!Array.isArray(publics) || publics.length !== 21) {
-  throw new Error(`expected 21 public signals, got ${publics.length}`);
+if (!Array.isArray(publics) || publics.length !== 19) {
+  throw new Error(`expected 19 public signals, got ${publics.length}`);
 }
 
 function fpBytes(s) {
@@ -118,11 +118,9 @@ const PUBLIC_INPUT_LABELS = [
   "publicRecipientAddress",
   "publicTokenAddress",
   "intentReplayId",
-  "registryRoot",
   "validUntilSeconds",
   "executionChainId",
-  "authPolicyRegistrationRoot",
-  "authPolicyRevocationRoot",
+  "authPolicyRoot",
   "outputNoteDataHash0",
   "outputNoteDataHash1",
   "outputNoteDataHash2",
@@ -130,6 +128,11 @@ const PUBLIC_INPUT_LABELS = [
   "blindedAuthCommitment",
   "transactionIntentDigest",
 ];
+if (PUBLIC_INPUT_LABELS.length !== publics.length) {
+  throw new Error(
+    `PUBLIC_INPUT_LABELS length ${PUBLIC_INPUT_LABELS.length} != publicSignals length ${publics.length}`,
+  );
+}
 
 async function verifyOK(p, pubs) {
   return await snarkjs.groth16.verify(

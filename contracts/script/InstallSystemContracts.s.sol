@@ -10,9 +10,10 @@ import {PoseidonFieldLib} from "../src/libraries/PoseidonFieldLib.sol";
 
 /// @notice One-time genesis-state initializer for ShieldedPool. Extends the
 ///         production contract with an `initialize()` selector that fills the
-///         four empty-subtree caches (note tree, user-registry sparse, auth
-///         registration, auth revocation sparse) and seeds the corresponding
-///         current roots so the very first append produces the correct value.
+///         two empty-subtree caches (note tree, auth-policy registry sparse),
+///         seeds the corresponding current roots so the very first append
+///         produces the correct value, and seeds `nextLeafPosition = 1` so
+///         slot 0 is reserved as the unassigned-address sentinel.
 ///
 ///         The harness is etched at SHIELDED_POOL_ADDRESS, `initialize()` is
 ///         called, and then the production runtime code is etched back. The
@@ -32,41 +33,21 @@ contract ShieldedPoolInstallHarness is ShieldedPool {
             noteCommitmentEmptyHashes[COMMITMENT_TREE_DEPTH - 1]
         );
 
-        // User-registry sparse tree (depth 160).
-        userRegistrySparseEmptyHashes[0] = 0;
-        for (uint256 i = 1; i < REGISTRY_TREE_DEPTH; ++i) {
-            userRegistrySparseEmptyHashes[i] = PoseidonFieldLib.merkleHash(
-                userRegistrySparseEmptyHashes[i - 1], userRegistrySparseEmptyHashes[i - 1]
+        // Auth-policy registry sparse tree (depth 32).
+        authPolicySparseEmptyHashes[0] = 0;
+        for (uint256 i = 1; i < AUTH_POLICY_TREE_DEPTH; ++i) {
+            authPolicySparseEmptyHashes[i] = PoseidonFieldLib.merkleHash(
+                authPolicySparseEmptyHashes[i - 1], authPolicySparseEmptyHashes[i - 1]
             );
         }
-        currentUserRegistryRoot = PoseidonFieldLib.merkleHash(
-            userRegistrySparseEmptyHashes[REGISTRY_TREE_DEPTH - 1],
-            userRegistrySparseEmptyHashes[REGISTRY_TREE_DEPTH - 1]
+        currentAuthPolicyRoot = PoseidonFieldLib.merkleHash(
+            authPolicySparseEmptyHashes[AUTH_POLICY_TREE_DEPTH - 1],
+            authPolicySparseEmptyHashes[AUTH_POLICY_TREE_DEPTH - 1]
         );
 
-        // Auth-policy registration tree (depth 32, append-only).
-        authPolicyRegistrationEmptyHashes[0] = 0;
-        for (uint256 i = 1; i < AUTH_POLICY_TREE_DEPTH; ++i) {
-            authPolicyRegistrationEmptyHashes[i] = PoseidonFieldLib.merkleHash(
-                authPolicyRegistrationEmptyHashes[i - 1], authPolicyRegistrationEmptyHashes[i - 1]
-            );
-        }
-        currentAuthPolicyRegistrationRoot = PoseidonFieldLib.merkleHash(
-            authPolicyRegistrationEmptyHashes[AUTH_POLICY_TREE_DEPTH - 1],
-            authPolicyRegistrationEmptyHashes[AUTH_POLICY_TREE_DEPTH - 1]
-        );
-
-        // Auth-policy revocation sparse tree (depth 32).
-        authPolicyRevocationSparseEmptyHashes[0] = 0;
-        for (uint256 i = 1; i < AUTH_POLICY_TREE_DEPTH; ++i) {
-            authPolicyRevocationSparseEmptyHashes[i] = PoseidonFieldLib.merkleHash(
-                authPolicyRevocationSparseEmptyHashes[i - 1], authPolicyRevocationSparseEmptyHashes[i - 1]
-            );
-        }
-        currentAuthPolicyRevocationRoot = PoseidonFieldLib.merkleHash(
-            authPolicyRevocationSparseEmptyHashes[AUTH_POLICY_TREE_DEPTH - 1],
-            authPolicyRevocationSparseEmptyHashes[AUTH_POLICY_TREE_DEPTH - 1]
-        );
+        // Slot 0 reserved as the "unassigned" sentinel; first setAuthPolicy
+        // from an address gets leafPosition 1.
+        nextLeafPosition = 1;
     }
 }
 
@@ -77,9 +58,7 @@ abstract contract InstallSystemContractsBase is CommonBase {
         internal
         returns (
             uint256 noteCommitmentRoot,
-            uint256 userRegistryRoot,
-            uint256 authPolicyRegistrationRoot,
-            uint256 authPolicyRevocationRoot
+            uint256 authPolicyRoot
         )
     {
         vm.etch(POOL_ADDRESS, type(ShieldedPoolInstallHarness).runtimeCode);
@@ -128,17 +107,13 @@ contract InstallSystemContracts is Script, InstallSystemContractsBase {
 
         (
             uint256 noteCommitmentRoot,
-            uint256 userRegistryRoot,
-            uint256 authPolicyRegistrationRoot,
-            uint256 authPolicyRevocationRoot
+            uint256 authPolicyRoot
         ) = install();
         writeStateDump(stateDumpPath);
 
         console2.log("state dump:", stateDumpPath);
         console2.log("pool:", POOL_ADDRESS);
         console2.log("commitment root:", noteCommitmentRoot);
-        console2.log("user registry root:", userRegistryRoot);
-        console2.log("auth policy registration root:", authPolicyRegistrationRoot);
-        console2.log("auth policy revocation root:", authPolicyRevocationRoot);
+        console2.log("auth policy root:", authPolicyRoot);
     }
 }

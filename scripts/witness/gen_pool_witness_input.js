@@ -11,7 +11,8 @@
 //
 // Witness shape MUST track circuits/pool/pool.circom — fields the circuit
 // derives (path bits, leaf-index bits, operationKind, output token slots) are
-// NOT included; canonical tokenAddress and feeNoteRecipientAddress are.
+// NOT included; canonical tokenAddress, intent owner-hashes, and policy-set
+// state are.
 
 const fs = require('fs');
 const path = require('path');
@@ -24,8 +25,6 @@ const TAGS = JSON.parse(fs.readFileSync(path.join(ROOT, 'build/domain_tags.json'
 const T = Object.fromEntries(Object.entries(TAGS).map(([k,v]) => [k, BigInt(v)]));
 
 // ---- Helpers ----
-const bitsLSB = (val, n) => Array.from({length: n}, (_, i) => Number((BigInt(val) >> BigInt(i)) & 1n));
-
 function buildEmptyHashes(depth) {
   const e = [0n];
   for (let h = 0; h < depth; h++) e.push(poseidon(e[h], e[h]));
@@ -47,6 +46,7 @@ function noteCommitmentTreeRoot(leaves, depth) {
   }
   return level.get(0) ?? empty[depth];
 }
+
 function noteCommitmentSiblings(leafIdx, leaves, depth) {
   const empty = buildEmptyHashes(depth);
   const sibs = [];
@@ -68,51 +68,36 @@ function noteCommitmentSiblings(leafIdx, leaves, depth) {
   return sibs;
 }
 
-// Sparse depth-160 user registry: build root + per-key siblings. Bottom-up
-// walk uses bit h of the (uint160) key at level h (matches the circuit's
-// MSB-first top-down convention; bottom-up indexing is identical for any
-// fixed-depth binary key).
-function buildSparseRegistryRoot(entries, depth) {
-  const emptyAtLevel = [0n];
-  for (let h = 0; h < depth; h++) {
-    emptyAtLevel.push(poseidon(emptyAtLevel[h], emptyAtLevel[h]));
-  }
-
+// Sparse depth-D tree, keyed LSB-first. Single-leaf or few-leaf flows.
+function buildSparseRootAndSiblings(leafByKey, depth, queryKey) {
+  const empty = buildEmptyHashes(depth);
   const nodes = new Map();
-  const keyOf = (h, pfx) => `${h}:${pfx.toString(16)}`;
-  for (const e of entries) {
-    nodes.set(keyOf(0, BigInt(e.key)), e.leaf);
+  const k = (h, idx) => `${h}:${idx}`;
+  for (const [key, leaf] of leafByKey) {
+    nodes.set(k(0, BigInt(key).toString()), leaf);
   }
   for (let h = 0; h < depth; h++) {
-    const nextPrefixes = new Set();
-    for (const k of nodes.keys()) {
-      const [hStr, hex] = k.split(':');
+    const prefixes = new Set();
+    for (const kk of nodes.keys()) {
+      const [hStr, idxStr] = kk.split(':');
       if (Number(hStr) !== h) continue;
-      const pfx = BigInt('0x' + hex);
-      nextPrefixes.add(pfx >> 1n);
+      prefixes.add(BigInt(idxStr) >> 1n);
     }
-    for (const pfx of nextPrefixes) {
-      const leftChild  = pfx << 1n;
-      const rightChild = (pfx << 1n) | 1n;
-      const leftVal  = nodes.get(keyOf(h, leftChild))  ?? emptyAtLevel[h];
-      const rightVal = nodes.get(keyOf(h, rightChild)) ?? emptyAtLevel[h];
-      nodes.set(keyOf(h+1, pfx), poseidon(leftVal, rightVal));
+    for (const pfx of prefixes) {
+      const left  = nodes.get(k(h, (pfx << 1n).toString()))         ?? empty[h];
+      const right = nodes.get(k(h, ((pfx << 1n) | 1n).toString()))  ?? empty[h];
+      nodes.set(k(h + 1, pfx.toString()), poseidon(left, right));
     }
   }
-  const root = nodes.get(keyOf(depth, 0n)) ?? emptyAtLevel[depth];
+  const root = nodes.get(k(depth, '0')) ?? empty[depth];
 
-  function siblingsForKey(key) {
-    const sibs = [];
-    let pos = BigInt(key);
-    for (let h = 0; h < depth; h++) {
-      const cur = pos >> BigInt(h);
-      const sibPfx = cur ^ 1n;
-      sibs.push(nodes.get(keyOf(h, sibPfx)) ?? emptyAtLevel[h]);
-    }
-    return sibs;
+  const sibs = [];
+  let pos = BigInt(queryKey);
+  for (let h = 0; h < depth; h++) {
+    const sibIdx = (pos >> BigInt(h)) ^ 1n;
+    sibs.push(nodes.get(k(h, sibIdx.toString())) ?? empty[h]);
   }
-
-  return { root, siblingsForKey };
+  return { root, sibs };
 }
 
 // ---- Sender identity ----
@@ -122,12 +107,6 @@ const authorizingAddress      = 0x1111111111111111111111111111111111111111n;
 
 const senderOwnerNullifierKeyHash = poseidon(T.OWNER_NULLIFIER_KEY_HASH_DOMAIN, senderOwnerNullifierKey);
 const senderNoteSecretSeedHash    = poseidon(T.NOTE_SECRET_SEED_DOMAIN,         senderNoteSecretSeed);
-const senderRegLeaf = poseidon(
-  T.USER_REGISTRY_LEAF_DOMAIN,
-  authorizingAddress,
-  senderOwnerNullifierKeyHash,
-  senderNoteSecretSeedHash,
-);
 
 // ---- Canonical token (single witness shared across real inputs/outputs) ----
 const tokenAddress = 0x2222222222222222222222222222222222222222n;
@@ -158,11 +137,6 @@ const inSiblings = inLeafIndex.map(idx => noteCommitmentSiblings(Number(idx), no
 const outIsReal = [1n, 1n, 1n];
 const outAmount = [8n, 5n, 2n]; // 8+5+2 = 15 = 10+5 input total, publicAmountOut = 0
 
-const outRecipient = [
-  0x3333333333333333333333333333333333333333n, // payment recipient (transfer slot 0)
-  authorizingAddress,                          // change to sender (slot 1)
-  0x4444444444444444444444444444444444444444n, // fee recipient (slot 2)
-];
 const outOwnerNullifierKey = [
   0xBABE0001n,                  // recipient's key
   senderOwnerNullifierKey,      // sender's own key for change
@@ -170,71 +144,54 @@ const outOwnerNullifierKey = [
 ];
 const outOwnerNullifierKeyHash = outOwnerNullifierKey.map(k =>
   poseidon(T.OWNER_NULLIFIER_KEY_HASH_DOMAIN, k));
-const outRecipientNoteSecretSeed = [0xC0DE01n, senderNoteSecretSeed, 0xC0DE03n];
-const outRecipientNoteSecretSeedHash = outRecipientNoteSecretSeed.map(s =>
-  poseidon(T.NOTE_SECRET_SEED_DOMAIN, s));
-
-// ---- User registry (sender + 3 recipients, deduplicated) ----
-const outRecipientLeaf = outRecipient.map((u, i) =>
-  poseidon(T.USER_REGISTRY_LEAF_DOMAIN, u, outOwnerNullifierKeyHash[i],
-           outRecipientNoteSecretSeedHash[i]));
-
-const registryEntries = [
-  { key: authorizingAddress, leaf: senderRegLeaf },
-  { key: outRecipient[0],    leaf: outRecipientLeaf[0] },
-  { key: outRecipient[1],    leaf: outRecipientLeaf[1] }, // sender's own — same key as sender
-  { key: outRecipient[2],    leaf: outRecipientLeaf[2] },
-];
-const dedupedEntries = [];
-const seen = new Set();
-for (const e of registryEntries) {
-  const k = e.key.toString();
-  if (!seen.has(k)) { dedupedEntries.push(e); seen.add(k); }
-}
-const userRegBuilt = buildSparseRegistryRoot(dedupedEntries, 160);
-const registryRoot = userRegBuilt.root;
-const senderUserSiblings = userRegBuilt.siblingsForKey(authorizingAddress);
-const outRecipientSiblings = outRecipient.map(u => userRegBuilt.siblingsForKey(u));
 
 // ---- Operation mode + intent fields ----
 //   operationKind is derived from publicAmountOut by the circuit; transfer
 //   here means publicAmountOut == 0.
-const recipientAddress      = outRecipient[0];
-const feeRecipientAddress   = outRecipient[2];
-const feeNoteRecipientAddress = outRecipient[2];   // matches feeRecipientAddress when feeRecipientAddress != 0
+const recipientOwnerNullifierKeyHash        = outOwnerNullifierKeyHash[0];
+const feeNoteRecipientOwnerNullifierKeyHash = outOwnerNullifierKeyHash[2];
 const feeAmount             = outAmount[2];
 const nonce                 = 0x9F3A1C7E5B2D4F86n;
 const executionConstraintsFlags = 0n;
 const validUntilSeconds     = 1735689600n;
 const executionChainId      = 1n;
 
-// ---- Auth-policy registration + revocation ----
+// ---- Auth-policy registry + policy-set ----
 const authVerifier        = 0xA1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1n;
 const authSecret          = 0xA0701337n;
 const authDataCommitment  = poseidon(T.POLICY_COMMITMENT_DOMAIN, authSecret);
 const blindingFactor      = 0xB17ED15ABCDEF0123456789ABCDEF01n;
 const registrationBlinder = 0xCC00CC00CC00CC00n;
-const leafPosition        = 0n;
 
-const policyCommitment = poseidon(T.POLICY_COMMITMENT_DOMAIN, authVerifier, authDataCommitment, registrationBlinder);
-const authPolicyLeaf   = poseidon(T.AUTH_POLICY_DOMAIN, authorizingAddress, policyCommitment);
+// One policy at policy-set slot 0 → policySetCommitment is the depth-8
+// sparse root for this single leaf. policyCommitment is the leaf value.
+const policyCommitment = poseidon(
+  T.POLICY_COMMITMENT_DOMAIN, authVerifier, authDataCommitment, registrationBlinder,
+);
+const policySetLeafPosition = 0n;
+const POLICY_SET_DEPTH = 8;
+const policySetBuilt = buildSparseRootAndSiblings(
+  [[policySetLeafPosition, policyCommitment]], POLICY_SET_DEPTH, policySetLeafPosition,
+);
+const policySetCommitment = policySetBuilt.root;
+const policySetSiblings   = policySetBuilt.sibs;
 
-const authRegEmpty = [0n];
-for (let h = 0; h < 32; h++) authRegEmpty.push(poseidon(authRegEmpty[h], authRegEmpty[h]));
-
-function appendOnlyRoot(leafVal, leafIdx, depth) {
-  const leaves = new Map([[Number(leafIdx), leafVal]]);
-  return noteCommitmentTreeRoot(leaves, depth);
-}
-function appendOnlySiblings(leafIdx, leafVal, depth) {
-  const leaves = new Map([[Number(leafIdx), leafVal]]);
-  return noteCommitmentSiblings(Number(leafIdx), leaves, depth);
-}
-
-const authPolicyRegistrationRoot = appendOnlyRoot(authPolicyLeaf, leafPosition, 32);
-const authRegSiblings            = appendOnlySiblings(leafPosition, authPolicyLeaf, 32);
-const authPolicyRevocationRoot   = authRegEmpty[32];
-const authRevSiblings            = Array.from({length: 32}, (_, h) => authRegEmpty[h]);
+// Auth-policy registry leaf: leafPosition 1 (slot 0 reserved as the
+// unassigned sentinel; first setAuthPolicy from sender gets leafPosition 1).
+const leafPosition = 1n;
+const authPolicyLeaf = poseidon(
+  T.AUTH_POLICY_DOMAIN,
+  authorizingAddress,
+  senderOwnerNullifierKeyHash,
+  senderNoteSecretSeedHash,
+  policySetCommitment,
+);
+const AUTH_POLICY_TREE_DEPTH = 32;
+const authPolicyBuilt = buildSparseRootAndSiblings(
+  [[leafPosition, authPolicyLeaf]], AUTH_POLICY_TREE_DEPTH, leafPosition,
+);
+const authPolicyRoot     = authPolicyBuilt.root;
+const authPolicySiblings = authPolicyBuilt.sibs;
 
 // ---- Output noteSecrets, body commitments, intent replay ID ----
 const intentReplayId = poseidon(T.INTENT_REPLAY_ID_DOMAIN, senderOwnerNullifierKey,
@@ -261,9 +218,13 @@ const outLockedOutputBinding = [0,1,2].map(i =>
   poseidon(T.OUTPUT_BINDING_DOMAIN, outNoteBodyCommitment[i], outputNoteDataHash[i]));
 
 // All 3 slots locked => executionConstraintsFlags has bits 0/1/2 set (= 7).
-// (Spec Section 9.11: flag bit i pairs with lockedOutputBinding_i.)
-// We override executionConstraintsFlags = 7 for the worst-case witness.
+// (Spec Section 8.10: flag bit i pairs with lockedOutputBinding_i.)
 const execFlagsWorstCase = 7n;
+
+// ---- Public values ----
+const publicAmountOut         = 0n;     // transfer
+const publicRecipientAddress  = 0n;
+const publicTokenAddress      = 0n;
 
 // ---- Blinded auth commitment + intent digest ----
 //   Transfer mode: digest's amount == outAmount[0] (recipient amount),
@@ -273,12 +234,13 @@ const transactionIntentDigest = poseidon(
   T.TRANSACTION_INTENT_DIGEST_DOMAIN,
   authVerifier,
   authorizingAddress,
-  0n,                               // operationKind = TRANSFER_OP
+  0n,                                       // operationKind = TRANSFER_OP
   tokenAddress,
-  recipientAddress,
-  outAmount[0],                     // recipient amount
-  feeRecipientAddress,
+  recipientOwnerNullifierKeyHash,
+  outAmount[0],                             // recipient amount
+  feeNoteRecipientOwnerNullifierKeyHash,
   feeAmount,
+  publicRecipientAddress,                   // 0 in transfer
   execFlagsWorstCase,
   outLockedOutputBinding[0],
   outLockedOutputBinding[1],
@@ -288,18 +250,13 @@ const transactionIntentDigest = poseidon(
   executionChainId,
 );
 
-// ---- Public values ----
-const publicAmountOut         = 0n;     // transfer
-const publicRecipientAddress  = 0n;
-const publicTokenAddress      = 0n;
-
 // ---- Assemble input.json ----
 const toStr = v => (typeof v === 'bigint' ? v.toString() : String(v));
 const arr   = a => a.map(toStr);
 const arr2  = a => a.map(arr);
 
 const out = {
-  // public (21)
+  // public (19)
   noteCommitmentRoot:          toStr(noteCommitmentRoot),
   nullifier0:                  toStr(inRealNullifier[0]),
   nullifier1:                  toStr(inRealNullifier[1]),
@@ -310,11 +267,9 @@ const out = {
   publicRecipientAddress:      toStr(publicRecipientAddress),
   publicTokenAddress:          toStr(publicTokenAddress),
   intentReplayId:              toStr(intentReplayId),
-  registryRoot:                toStr(registryRoot),
   validUntilSeconds:           toStr(validUntilSeconds),
   executionChainId:            toStr(executionChainId),
-  authPolicyRegistrationRoot:  toStr(authPolicyRegistrationRoot),
-  authPolicyRevocationRoot:    toStr(authPolicyRevocationRoot),
+  authPolicyRoot:              toStr(authPolicyRoot),
   outputNoteDataHash0:         toStr(outputNoteDataHash[0]),
   outputNoteDataHash1:         toStr(outputNoteDataHash[1]),
   outputNoteDataHash2:         toStr(outputNoteDataHash[2]),
@@ -322,11 +277,14 @@ const out = {
   blindedAuthCommitment:       toStr(blindedAuthCommitment),
   transactionIntentDigest:     toStr(transactionIntentDigest),
 
-  // private — sender
+  // private — sender + leaf state
   senderOwnerNullifierKey:     toStr(senderOwnerNullifierKey),
   senderNoteSecretSeed:        toStr(senderNoteSecretSeed),
   authorizingAddress:          toStr(authorizingAddress),
-  senderUserSiblings:          arr(senderUserSiblings),
+  noteSecretSeedHash:          toStr(senderNoteSecretSeedHash),
+  policySetCommitment:         toStr(policySetCommitment),
+  leafPosition:                toStr(leafPosition),
+  authPolicySiblings:          arr(authPolicySiblings),
 
   // private — inputs
   inIsReal:                    arr(inIsReal),
@@ -339,29 +297,24 @@ const out = {
   outIsReal:                   arr(outIsReal),
   outAmount:                   arr(outAmount),
   outOwnerNullifierKeyHash:    arr(outOwnerNullifierKeyHash),
-  outRecipient:                arr(outRecipient),
-  outRecipientNoteSecretSeedHash: arr(outRecipientNoteSecretSeedHash),
-  outRecipientSiblings:        arr2(outRecipientSiblings),
   outLockedOutputBinding:      arr(outLockedOutputBinding),
 
   // private — canonical token
   tokenAddress:                toStr(tokenAddress),
 
   // private — intent fields
-  recipientAddress:            toStr(recipientAddress),
-  feeRecipientAddress:         toStr(feeRecipientAddress),
-  feeNoteRecipientAddress:     toStr(feeNoteRecipientAddress),
-  feeAmount:                   toStr(feeAmount),
-  nonce:                       toStr(nonce),
-  executionConstraintsFlags:   toStr(execFlagsWorstCase),
+  recipientOwnerNullifierKeyHash:        toStr(recipientOwnerNullifierKeyHash),
+  feeNoteRecipientOwnerNullifierKeyHash: toStr(feeNoteRecipientOwnerNullifierKeyHash),
+  feeAmount:                             toStr(feeAmount),
+  nonce:                                 toStr(nonce),
+  executionConstraintsFlags:             toStr(execFlagsWorstCase),
 
-  // private — auth-policy
+  // private — auth-policy proof witnesses
   authDataCommitment:          toStr(authDataCommitment),
   blindingFactor:              toStr(blindingFactor),
   registrationBlinder:         toStr(registrationBlinder),
-  leafPosition:                toStr(leafPosition),
-  authRegSiblings:             arr(authRegSiblings),
-  authRevSiblings:             arr(authRevSiblings),
+  policySetLeafPosition:       toStr(policySetLeafPosition),
+  policySetSiblings:           arr(policySetSiblings),
 };
 
 const outPath = path.join(ROOT, 'build/pool/input.json');

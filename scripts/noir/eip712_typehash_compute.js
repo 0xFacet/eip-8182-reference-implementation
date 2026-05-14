@@ -12,20 +12,21 @@ const VERSION = "1";
 
 const DOMAIN_TYPE = "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)";
 
-// Per EIP-8182 Section 6.4 (normative MUST): companion ERCs MUST authenticate
+// Per EIP-8182 Section 6.1 (normative MUST): companion ERCs MUST authenticate
 // blindingFactor via signature over the full signed intent struct, even though
 // blindingFactor is excluded from the poseidon transactionIntentDigest. Hence
-// the 15-field struct below.
+// the 16-field struct below.
 const INTENT_TYPE =
   "TransactionIntent(" +
     "address authVerifier," +
     "address authorizingAddress," +
     "uint256 operationKind," +
     "address tokenAddress," +
-    "address recipientAddress," +
+    "uint256 recipientOwnerNullifierKeyHash," +
     "uint256 amount," +
-    "address feeRecipientAddress," +
+    "uint256 feeNoteRecipientOwnerNullifierKeyHash," +
     "uint256 feeAmount," +
+    "address publicRecipientAddress," +
     "uint256 executionConstraintsFlags," +
     "bytes32 lockedOutputBinding0," +
     "bytes32 lockedOutputBinding1," +

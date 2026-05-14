@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Poseidon2Sponge} from "./Poseidon2Sponge.sol";
 
-/// @notice Convenience wrappers around the EIP-8182 Section 11 hash contexts.
+/// @notice Convenience wrappers around the EIP-8182 Section 10 hash contexts.
 ///         Domain tags are derived as `keccak256("eip-8182.<context>") mod p_bn254`
 ///         and MUST match circuits/common/domain_tags.circom.
 library PoseidonFieldLib {
@@ -24,8 +24,6 @@ library PoseidonFieldLib {
         uint256(keccak256("eip-8182.note_secret_seed")) % FIELD_MODULUS;
     uint256 internal constant AUTH_POLICY_DOMAIN =
         uint256(keccak256("eip-8182.auth_policy")) % FIELD_MODULUS;
-    uint256 internal constant USER_REGISTRY_LEAF_DOMAIN =
-        uint256(keccak256("eip-8182.user_registry_leaf")) % FIELD_MODULUS;
 
     function merkleHash(uint256 left, uint256 right) internal pure returns (uint256) {
         return Poseidon2Sponge.hashPair(left, right);
@@ -56,31 +54,21 @@ library PoseidonFieldLib {
         return Poseidon2Sponge.hashPair(NOTE_SECRET_SEED_DOMAIN, noteSecretSeed);
     }
 
-    function userRegistryLeaf(
+    /// @notice Section 6.1 / 8.1: leaf the contract writes into the auth-policy
+    ///         registry on `setAuthPolicy`. The user field is pinned to
+    ///         msg.sender by construction.
+    function authPolicyLeaf(
         address user,
         uint256 ownerNullifierKeyHash,
-        uint256 noteSecretSeedHashValue
+        uint256 noteSecretSeedHashValue,
+        uint256 policySetCommitment
     ) internal pure returns (uint256) {
-        return Poseidon2Sponge.hash4(
-            USER_REGISTRY_LEAF_DOMAIN,
-            uint256(uint160(user)),
-            ownerNullifierKeyHash,
-            noteSecretSeedHashValue
-        );
-    }
-
-    /// @notice Section 6.4 / 9.1: leaf the contract appends to the auth-policy
-    ///         registration tree on `registerAuthPolicy`. The user field is
-    ///         pinned to msg.sender by construction.
-    function authPolicyLeaf(address user, uint256 policyCommitment)
-        internal
-        pure
-        returns (uint256)
-    {
-        return Poseidon2Sponge.hash3(
+        return Poseidon2Sponge.hash5(
             AUTH_POLICY_DOMAIN,
             uint256(uint160(user)),
-            policyCommitment
+            ownerNullifierKeyHash,
+            noteSecretSeedHashValue,
+            policySetCommitment
         );
     }
 

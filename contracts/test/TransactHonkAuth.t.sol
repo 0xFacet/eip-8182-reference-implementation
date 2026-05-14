@@ -8,9 +8,13 @@ import {ShieldedPool} from "../src/ShieldedPool.sol";
 import {InstallSystemContractsBase} from "../script/InstallSystemContracts.s.sol";
 import {RealAuthVerifier} from "../src/auth/RealAuthVerifier.sol";
 import {HonkVerifier} from "../src/auth/HonkRealAuthVerifier.sol";
+import {DemoAuthVerifier} from "../src/auth/DemoAuthVerifier.sol";
+import {AuthDemoGroth16Verifier} from "../src/AuthDemoGroth16Verifier.sol";
+import {IAuthVerifier} from "../src/interfaces/IAuthVerifier.sol";
 import {PoseidonFieldLib} from "../src/libraries/PoseidonFieldLib.sol";
 import {Poseidon2Sponge} from "../src/libraries/Poseidon2Sponge.sol";
 import {MockERC20} from "./MockERC20.sol";
+import {ShieldedPoolStepNineHarness} from "./ShieldedPoolStepNineHarness.sol";
 
 /// @notice End-to-end transact() against the realistic Honk auth circuit:
 ///         pool proof (Groth16/BN254, inline-verified by the system contract)
@@ -22,24 +26,14 @@ import {MockERC20} from "./MockERC20.sol";
 contract TransactHonkAuthTest is Test, InstallSystemContractsBase {
     using stdJson for string;
 
-    // --- Pinned witness identities (must match scripts/noir/gen_honk_pool_witness_input.js) ---
     // Sender == authorizing address == pubkey-derived ethereum address of the
     // deterministic test keypair (Anvil's account #1 private key).
     address internal constant SENDER = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
-
-    // Recipients that pool gen reuses verbatim from the demo flow.
-    address internal constant RECIPIENT0 = 0x3333333333333333333333333333333333333333;
-    address internal constant RECIPIENT2 = 0x4444444444444444444444444444444444444444;
-
     address internal constant TOKEN_ADDR = 0x2222222222222222222222222222222222222222;
     address internal constant AUTH_VERIFIER_ADDR = 0x8182aaaa8182aaAA8182AaAa8182aAAa8182aAaa;
 
     uint256 internal constant SENDER_NULLIFIER_KEY = 0xCAFE0001;
     uint256 internal constant SENDER_SECRET_SEED   = 0xCAFE0002;
-    uint256 internal constant R0_NULLIFIER_KEY     = 0xBABE0001;
-    uint256 internal constant R0_SECRET_SEED       = 0xC0DE01;
-    uint256 internal constant R2_NULLIFIER_KEY     = 0xBABE0003;
-    uint256 internal constant R2_SECRET_SEED       = 0xC0DE03;
 
     uint256 internal constant IN0_AMOUNT       = 10;
     uint256 internal constant IN1_AMOUNT       = 5;
@@ -47,9 +41,8 @@ contract TransactHonkAuthTest is Test, InstallSystemContractsBase {
     uint256 internal constant IN1_NOTE_SECRET  = 0xDEADBEEF02;
 
     uint256 internal constant REGISTRATION_BLINDER = 0xCC00CC00CC00CC00;
-    // Pubkey-derived authDataCommitment is read from session.json's sidecar
-    // at runtime (set in setUp) so changes to the auth circuit's auth-data
-    // commitment formula don't require updating a pinned constant here.
+    uint256 internal constant POLICY_SET_DEPTH = 8;
+
     uint256 internal authDataCommitment;
 
     ShieldedPool internal pool;
@@ -62,16 +55,11 @@ contract TransactHonkAuthTest is Test, InstallSystemContractsBase {
 
     function setUp() public {
         vm.chainId(1);
-        // The witness pins validUntilSeconds = 1735689600.
         vm.warp(1735689600 - 600);
 
         install();
         pool = ShieldedPool(POOL_ADDRESS);
 
-        // Skip setup if the Honk session JSON hasn't been generated. The
-        // file is produced by scripts/integration/build_honk_session.js and
-        // requires the Noir+bb toolchain; gating here keeps `forge test`
-        // green out-of-the-box even when those tools aren't installed.
         if (!_fileExists("build/integration_honk/session.json")) {
             _skipMissingSession = true;
             return;
@@ -79,7 +67,6 @@ contract TransactHonkAuthTest is Test, InstallSystemContractsBase {
 
         honkVerifier = new HonkVerifier();
 
-        // Read session before constructing the wrapper -- need the proof length.
         session = vm.readFile("build/integration_honk/session.json");
         bytes memory authProofBytes = vm.parseBytes(stdJson.readString(session, ".auth.proofHex"));
         authVerifierImpl = new RealAuthVerifier(honkVerifier, authProofBytes.length);
@@ -106,14 +93,27 @@ contract TransactHonkAuthTest is Test, InstallSystemContractsBase {
                 "build/integration_honk/session.json missing; run scripts/integration/build_honk_session.js"
             );
         }
-        _register(SENDER,     SENDER_NULLIFIER_KEY, SENDER_SECRET_SEED);
-        _register(RECIPIENT0, R0_NULLIFIER_KEY,     R0_SECRET_SEED);
-        _register(RECIPIENT2, R2_NULLIFIER_KEY,     R2_SECRET_SEED);
-
+        // 1. Register the sender's auth-policy leaf.
         uint256 senderOnkHash = PoseidonFieldLib.merkleHash(
             PoseidonFieldLib.OWNER_NULLIFIER_KEY_HASH_DOMAIN,
             SENDER_NULLIFIER_KEY
         );
+        uint256 senderSeedHash = PoseidonFieldLib.noteSecretSeedHash(SENDER_SECRET_SEED);
+        uint256 policyCommitment = Poseidon2Sponge.hash4(
+            uint256(keccak256("eip-8182.policy_commitment")) % PoseidonFieldLib.FIELD_MODULUS,
+            uint256(uint160(AUTH_VERIFIER_ADDR)),
+            authDataCommitment,
+            REGISTRATION_BLINDER
+        );
+        uint256 policySetCommitment = _policySetRootSingleLeafSlotZero(policyCommitment);
+
+        vm.prank(SENDER);
+        uint256 leafPosition = pool.setAuthPolicy(
+            senderOnkHash, senderSeedHash, policySetCommitment
+        );
+        assertEq(leafPosition, 1, "first setAuthPolicy from sender must land at slot 1");
+
+        // 2. Deposit the two input notes.
         uint256 ownerCommitment0 = Poseidon2Sponge.hash3(
             uint256(keccak256("eip-8182.owner_commitment")) % PoseidonFieldLib.FIELD_MODULUS,
             senderOnkHash,
@@ -129,34 +129,13 @@ contract TransactHonkAuthTest is Test, InstallSystemContractsBase {
         pool.deposit(TOKEN_ADDR, IN0_AMOUNT, ownerCommitment0, "");
         pool.deposit(TOKEN_ADDR, IN1_AMOUNT, ownerCommitment1, "");
 
-        // Realistic policyCommitment uses the pubkey-derived authDataCommitment.
-        uint256 policyCommitment = Poseidon2Sponge.hash4(
-            uint256(keccak256("eip-8182.policy_commitment")) % PoseidonFieldLib.FIELD_MODULUS,
-            uint256(uint160(AUTH_VERIFIER_ADDR)),
-            authDataCommitment,
-            REGISTRATION_BLINDER
-        );
-        vm.prank(SENDER);
-        uint256 leafPosition = pool.registerAuthPolicy(policyCommitment);
-        assertEq(leafPosition, 0, "first auth registration must land at slot 0");
-
+        // 3. Sanity-check post-setup roots match the witness.
         ShieldedPool.PublicInputs memory pi = _readPublicInputs();
+        (uint256 onChainNoteRoot, uint256 onChainAuthPolicyRoot) = pool.getCurrentRoots();
+        assertEq(onChainNoteRoot, pi.noteCommitmentRoot, "note tree root mismatch");
+        assertEq(onChainAuthPolicyRoot, pi.authPolicyRoot, "auth-policy root mismatch");
 
-        (
-            uint256 onChainNoteRoot,
-            uint256 onChainRegistryRoot,
-            uint256 onChainAuthRegRoot,
-            uint256 onChainAuthRevRoot
-        ) = pool.getCurrentRoots();
-        assertEq(onChainNoteRoot,    pi.noteCommitmentRoot,
-            "note tree root mismatch");
-        assertEq(onChainRegistryRoot, pi.registryRoot,
-            "user registry root mismatch");
-        assertEq(onChainAuthRegRoot, pi.authPolicyRegistrationRoot,
-            "auth-policy registration root mismatch");
-        assertEq(onChainAuthRevRoot, pi.authPolicyRevocationRoot,
-            "auth-policy revocation root mismatch");
-
+        // 4. Submit the proof.
         bytes memory poolProof = vm.parseBytes(stdJson.readString(session, ".pool.proofHex"));
         bytes memory authProof = vm.parseBytes(stdJson.readString(session, ".auth.proofHex"));
 
@@ -173,23 +152,26 @@ contract TransactHonkAuthTest is Test, InstallSystemContractsBase {
         assertTrue(pool.isNullifierSpent(pi.nullifier0), "nullifier0 must be marked spent");
         assertTrue(pool.isNullifierSpent(pi.nullifier1), "nullifier1 must be marked spent");
         assertTrue(pool.isIntentReplayIdUsed(pi.intentReplayId), "intentReplayId must be consumed");
-        (uint256 noteRootAfter,,,) = pool.getCurrentRoots();
+        (uint256 noteRootAfter,) = pool.getCurrentRoots();
         assertTrue(noteRootAfter != onChainNoteRoot, "note root must advance");
     }
 
-    function _register(address user, uint256 nullifierKey, uint256 noteSecretSeed) private {
-        uint256 onkHash = PoseidonFieldLib.merkleHash(
-            PoseidonFieldLib.OWNER_NULLIFIER_KEY_HASH_DOMAIN,
-            nullifierKey
-        );
-        uint256 seedHash = PoseidonFieldLib.noteSecretSeedHash(noteSecretSeed);
-        vm.prank(user);
-        pool.registerUser(onkHash, seedHash);
+    function _policySetRootSingleLeafSlotZero(uint256 leaf) internal pure returns (uint256) {
+        uint256[POLICY_SET_DEPTH] memory empty;
+        empty[0] = 0;
+        for (uint256 h = 1; h < POLICY_SET_DEPTH; h++) {
+            empty[h] = PoseidonFieldLib.merkleHash(empty[h - 1], empty[h - 1]);
+        }
+        uint256 current = leaf;
+        for (uint256 h = 0; h < POLICY_SET_DEPTH; h++) {
+            current = PoseidonFieldLib.merkleHash(current, empty[h]);
+        }
+        return current;
     }
 
     function _readPublicInputs() private view returns (ShieldedPool.PublicInputs memory pi) {
-        uint256[] memory ps = new uint256[](21);
-        for (uint256 i; i < 21; ++i) {
+        uint256[] memory ps = new uint256[](19);
+        for (uint256 i; i < 19; ++i) {
             ps[i] = stdJson.readUint(
                 session, string.concat(".pool.publicSignals[", vm.toString(i), "]")
             );
@@ -204,16 +186,14 @@ contract TransactHonkAuthTest is Test, InstallSystemContractsBase {
         pi.publicRecipientAddress     = ps[7];
         pi.publicTokenAddress         = ps[8];
         pi.intentReplayId             = ps[9];
-        pi.registryRoot               = ps[10];
-        pi.validUntilSeconds          = ps[11];
-        pi.executionChainId           = ps[12];
-        pi.authPolicyRegistrationRoot = ps[13];
-        pi.authPolicyRevocationRoot   = ps[14];
-        pi.outputNoteDataHash0        = ps[15];
-        pi.outputNoteDataHash1        = ps[16];
-        pi.outputNoteDataHash2        = ps[17];
-        pi.authVerifier               = ps[18];
-        pi.blindedAuthCommitment      = ps[19];
-        pi.transactionIntentDigest    = ps[20];
+        pi.validUntilSeconds          = ps[10];
+        pi.executionChainId           = ps[11];
+        pi.authPolicyRoot             = ps[12];
+        pi.outputNoteDataHash0        = ps[13];
+        pi.outputNoteDataHash1        = ps[14];
+        pi.outputNoteDataHash2        = ps[15];
+        pi.authVerifier               = ps[16];
+        pi.blindedAuthCommitment      = ps[17];
+        pi.transactionIntentDigest    = ps[18];
     }
 }

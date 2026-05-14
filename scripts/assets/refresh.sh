@@ -38,7 +38,7 @@ shasum -a 256 "$ASSETS_LOCAL/pool_vk.bin" | awk '{print $1}' > "$ASSETS_LOCAL/po
 # 2. Three pool-verify vectors (typed inputs to ShieldedPool.verifyProof).
 echo "==> pool-verify vectors"
 # build_session.js writes build/integration/session.json — a fresh worst-case
-# pool proof against the current zkey, plus its 21 public signals.
+# pool proof against the current zkey, plus its 19 public signals.
 node scripts/integration/build_session.js >/dev/null
 node scripts/assets/gen_pool_verify_vectors.js \
   "$POOL_DIR/pool_vkey.json" \

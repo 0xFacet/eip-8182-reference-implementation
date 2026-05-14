@@ -152,50 +152,25 @@ contract BenchTest is Test, InstallSystemContractsBase {
     // register
     // =========================================================================
 
-    function test_bench_RegisterUser() public {
+    function test_bench_SetAuthPolicy() public {
         // Cost a first-time user pays to make themselves spendable in the pool.
         uint256 onkHash = PoseidonFieldLib.merkleHash(
             PoseidonFieldLib.OWNER_NULLIFIER_KEY_HASH_DOMAIN,
-            uint256(keccak256("eip-8182-bench.register-user.onk"))
+            uint256(keccak256("eip-8182-bench.set-auth-policy.onk"))
         );
         uint256 seedHash = PoseidonFieldLib.noteSecretSeedHash(
-            uint256(keccak256("eip-8182-bench.register-user.seed"))
+            uint256(keccak256("eip-8182-bench.set-auth-policy.seed"))
         );
+        uint256 policySet =
+            uint256(keccak256("eip-8182-bench.set-auth-policy.psc")) % PoseidonFieldLib.FIELD_MODULUS;
         address actor = address(0xBEEF1);
         vm.prank(actor);
         uint256 g0 = gasleft();
-        pool.registerUser(onkHash, seedHash);
+        pool.setAuthPolicy(onkHash, seedHash, policySet);
         uint256 execGas = g0 - gasleft();
 
-        // registerUser is overloaded; use the explicit (uint256,uint256) selector.
-        bytes memory cd = bytes.concat(
-            bytes4(keccak256("registerUser(uint256,uint256)")),
-            abi.encode(onkHash, seedHash)
-        );
-        _writeOpBench("register_user", execGas, _calldataGas(cd));
-    }
-
-    function test_bench_RegisterAuthPolicy() public {
-        // Need the user to be registered first (registerAuthPolicy requires
-        // the caller to be in the user registry). The bench doesn't include
-        // that registration in the measured number — that's what the
-        // register_user bench is for.
-        _register(SENDER, SENDER_NULLIFIER_KEY, SENDER_SECRET_SEED);
-
-        uint256 policyCommitment = Poseidon2Sponge.hash4(
-            uint256(keccak256("eip-8182.policy_commitment")) % PoseidonFieldLib.FIELD_MODULUS,
-            uint256(uint160(AUTH_VERIFIER_ADDR)),
-            uint256(keccak256("eip-8182-bench.register-auth-policy.adc")) % PoseidonFieldLib.FIELD_MODULUS,
-            REGISTRATION_BLINDER
-        );
-
-        vm.prank(SENDER);
-        uint256 g0 = gasleft();
-        pool.registerAuthPolicy(policyCommitment);
-        uint256 execGas = g0 - gasleft();
-
-        bytes memory cd = abi.encodeCall(pool.registerAuthPolicy, (policyCommitment));
-        _writeOpBench("register_auth_policy", execGas, _calldataGas(cd));
+        bytes memory cd = abi.encodeCall(pool.setAuthPolicy, (onkHash, seedHash, policySet));
+        _writeOpBench("set_auth_policy", execGas, _calldataGas(cd));
     }
 
     // =========================================================================
@@ -384,7 +359,9 @@ contract BenchTest is Test, InstallSystemContractsBase {
     }
 
     function _setupForTransact(TransactCtx memory ctx, AssetMode mode) internal {
-        _registerSenderAndRecipients();
+        // New spec: only the sender's auth-policy leaf is required; recipients
+        // do not need to be registered (intent binds recipientOwnerNullifierKeyHash).
+        _setSenderAuthPolicy(ctx.authDataCommitment);
         if (mode == AssetMode.NONE || mode == AssetMode.ERC20) {
             _depositSenderInputsERC20();
         } else {
@@ -392,26 +369,9 @@ contract BenchTest is Test, InstallSystemContractsBase {
         }
         if (mode == AssetMode.ETH)   vm.deal(address(pool), ctx.pi.publicAmountOut);
         if (mode == AssetMode.ERC20) MockERC20(TOKEN_ADDR).mint(address(pool), ctx.pi.publicAmountOut);
-        _registerAuthPolicyForSender(ctx.authDataCommitment);
     }
 
     // -------- Setup helpers --------
-
-    function _registerSenderAndRecipients() internal {
-        _register(SENDER,     SENDER_NULLIFIER_KEY, SENDER_SECRET_SEED);
-        _register(RECIPIENT0, R0_NULLIFIER_KEY,     R0_SECRET_SEED);
-        _register(RECIPIENT2, R2_NULLIFIER_KEY,     R2_SECRET_SEED);
-    }
-
-    function _register(address user, uint256 nullifierKey, uint256 noteSecretSeed) private {
-        uint256 onkHash = PoseidonFieldLib.merkleHash(
-            PoseidonFieldLib.OWNER_NULLIFIER_KEY_HASH_DOMAIN,
-            nullifierKey
-        );
-        uint256 seedHash = PoseidonFieldLib.noteSecretSeedHash(noteSecretSeed);
-        vm.prank(user);
-        pool.registerUser(onkHash, seedHash);
-    }
 
     function _depositSenderInputsERC20() internal {
         (uint256 oc0, uint256 oc1) = _senderOwnerCommitments();
@@ -438,20 +398,40 @@ contract BenchTest is Test, InstallSystemContractsBase {
         );
     }
 
-    function _registerAuthPolicyForSender(uint256 authDataCommitment) internal {
+    function _setSenderAuthPolicy(uint256 authDataCommitment) internal {
+        uint256 onkHash = PoseidonFieldLib.merkleHash(
+            PoseidonFieldLib.OWNER_NULLIFIER_KEY_HASH_DOMAIN,
+            SENDER_NULLIFIER_KEY
+        );
+        uint256 seedHash = PoseidonFieldLib.noteSecretSeedHash(SENDER_SECRET_SEED);
         uint256 policyCommitment = Poseidon2Sponge.hash4(
             uint256(keccak256("eip-8182.policy_commitment")) % PoseidonFieldLib.FIELD_MODULUS,
             uint256(uint160(AUTH_VERIFIER_ADDR)),
             authDataCommitment,
             REGISTRATION_BLINDER
         );
+        uint256 policySetCommitment = _policySetRootSingleLeafSlotZero(policyCommitment);
         vm.prank(SENDER);
-        pool.registerAuthPolicy(policyCommitment);
+        pool.setAuthPolicy(onkHash, seedHash, policySetCommitment);
+    }
+
+    /// @dev Depth-8 sparse Poseidon Merkle root over a single leaf at slot 0.
+    function _policySetRootSingleLeafSlotZero(uint256 leaf) internal pure returns (uint256) {
+        uint256[8] memory empty;
+        empty[0] = 0;
+        for (uint256 h = 1; h < 8; h++) {
+            empty[h] = PoseidonFieldLib.merkleHash(empty[h - 1], empty[h - 1]);
+        }
+        uint256 current = leaf;
+        for (uint256 h = 0; h < 8; h++) {
+            current = PoseidonFieldLib.merkleHash(current, empty[h]);
+        }
+        return current;
     }
 
     function _readPI(string memory session) internal pure returns (ShieldedPool.PublicInputs memory pi) {
-        uint256[] memory ps = new uint256[](21);
-        for (uint256 i; i < 21; ++i) {
+        uint256[] memory ps = new uint256[](19);
+        for (uint256 i; i < 19; ++i) {
             ps[i] = stdJson.readUint(
                 session, string.concat(".pool.publicSignals[", vm.toString(i), "]")
             );
@@ -466,17 +446,15 @@ contract BenchTest is Test, InstallSystemContractsBase {
         pi.publicRecipientAddress     = ps[7];
         pi.publicTokenAddress         = ps[8];
         pi.intentReplayId             = ps[9];
-        pi.registryRoot               = ps[10];
-        pi.validUntilSeconds          = ps[11];
-        pi.executionChainId           = ps[12];
-        pi.authPolicyRegistrationRoot = ps[13];
-        pi.authPolicyRevocationRoot   = ps[14];
-        pi.outputNoteDataHash0        = ps[15];
-        pi.outputNoteDataHash1        = ps[16];
-        pi.outputNoteDataHash2        = ps[17];
-        pi.authVerifier               = ps[18];
-        pi.blindedAuthCommitment      = ps[19];
-        pi.transactionIntentDigest    = ps[20];
+        pi.validUntilSeconds          = ps[10];
+        pi.executionChainId           = ps[11];
+        pi.authPolicyRoot             = ps[12];
+        pi.outputNoteDataHash0        = ps[13];
+        pi.outputNoteDataHash1        = ps[14];
+        pi.outputNoteDataHash2        = ps[15];
+        pi.authVerifier               = ps[16];
+        pi.blindedAuthCommitment      = ps[17];
+        pi.transactionIntentDigest    = ps[18];
     }
 
     // -------- Bucket measurement helpers --------

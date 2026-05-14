@@ -1,6 +1,6 @@
 // Demo auth circuit for EIP-8182 reference implementation.
 //
-// This is a minimal auth circuit that conforms to Section 9.1's auth-proof
+// This is a minimal auth circuit that conforms to Section 8.1's auth-proof
 // relation while keeping the credential cheap to verify in-circuit. It is
 // intended for end-to-end integration testing of the split-proof flow, not
 // for production deployment.
@@ -15,15 +15,15 @@
 // The circuit then computes:
 //   blindedAuthCommitment = poseidon(BLINDED_AUTH_COMMITMENT_DOMAIN,
 //                                    authDataCommitment, blindingFactor)
-//   transactionIntentDigest = Section 9.10
+//   transactionIntentDigest = Section 8.9
 //
 // Public outputs (the two values the system contract passes to verifyAuth):
 //   [blindedAuthCommitment, transactionIntentDigest]
 //
 // Why this is "the demo":
 // - Real production: replace `authDataCommitment == poseidon(authSecret)`
-//   with a secp256k1 ECDSA signature check over an EIP-712 typed-data hash,
-//   per Section 14. That requires ~1.5M constraints via 0xPARC's
+//   with a secp256k1 ECDSA signature check over an EIP-712 typed-data hash.
+//   That requires ~1.5M constraints via 0xPARC's
 //   circom-ecdsa + ~150K constraints for keccak. Composition pattern is the
 //   same: bind authVerifier == address(this) (here we accept it as a public
 //   input and the verifier contract enforces the binding), authenticate the
@@ -39,19 +39,20 @@ include "components.circom";
 include "domain_tags.circom";
 
 template AuthDemo() {
-    // ===== Public inputs (Section 9.1: exactly 2, in this order) =====
+    // ===== Public inputs (Section 8.1: exactly 2, in this order) =====
     signal input blindedAuthCommitment;
     signal input transactionIntentDigest;
 
-    // ===== Private witnesses (signed intent fields per Section 9.10) =====
+    // ===== Private witnesses (signed intent fields per Section 8.9) =====
     signal input authVerifier;
     signal input authorizingAddress;
     signal input operationKind;
     signal input tokenAddress;
-    signal input recipientAddress;
+    signal input recipientOwnerNullifierKeyHash;
     signal input amount;
-    signal input feeRecipientAddress;
+    signal input feeNoteRecipientOwnerNullifierKeyHash;
     signal input feeAmount;
+    signal input publicRecipientAddress;
     signal input executionConstraintsFlags;
     signal input lockedOutputBinding0;
     signal input lockedOutputBinding1;
@@ -88,21 +89,22 @@ template AuthDemo() {
 
     // ===== Step 3: compute transactionIntentDigest, enforce equality =====
     component intentHash = TransactionIntentDigest();
-    intentHash.authVerifier             <== authVerifier;
-    intentHash.authorizingAddress       <== authorizingAddress;
-    intentHash.operationKind            <== operationKind;
-    intentHash.tokenAddress             <== tokenAddress;
-    intentHash.recipientAddress         <== recipientAddress;
-    intentHash.amount                   <== amount;
-    intentHash.feeRecipientAddress      <== feeRecipientAddress;
-    intentHash.feeAmount                <== feeAmount;
-    intentHash.executionConstraintsFlags<== executionConstraintsFlags;
-    intentHash.lockedOutputBinding0     <== lockedOutputBinding0;
-    intentHash.lockedOutputBinding1     <== lockedOutputBinding1;
-    intentHash.lockedOutputBinding2     <== lockedOutputBinding2;
-    intentHash.nonce                    <== nonce;
-    intentHash.validUntilSeconds        <== validUntilSeconds;
-    intentHash.executionChainId         <== executionChainId;
+    intentHash.authVerifier                          <== authVerifier;
+    intentHash.authorizingAddress                    <== authorizingAddress;
+    intentHash.operationKind                         <== operationKind;
+    intentHash.tokenAddress                          <== tokenAddress;
+    intentHash.recipientOwnerNullifierKeyHash        <== recipientOwnerNullifierKeyHash;
+    intentHash.amount                                <== amount;
+    intentHash.feeNoteRecipientOwnerNullifierKeyHash <== feeNoteRecipientOwnerNullifierKeyHash;
+    intentHash.feeAmount                             <== feeAmount;
+    intentHash.publicRecipientAddress                <== publicRecipientAddress;
+    intentHash.executionConstraintsFlags             <== executionConstraintsFlags;
+    intentHash.lockedOutputBinding0                  <== lockedOutputBinding0;
+    intentHash.lockedOutputBinding1                  <== lockedOutputBinding1;
+    intentHash.lockedOutputBinding2                  <== lockedOutputBinding2;
+    intentHash.nonce                                 <== nonce;
+    intentHash.validUntilSeconds                     <== validUntilSeconds;
+    intentHash.executionChainId                      <== executionChainId;
     transactionIntentDigest === intentHash.out;
 }
 

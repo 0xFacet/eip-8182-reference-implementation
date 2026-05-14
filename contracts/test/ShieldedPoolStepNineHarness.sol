@@ -10,7 +10,7 @@ import {ShieldedPool} from "../src/ShieldedPool.sol";
 ///            the typed-array form has already passed the bytes-decode
 ///            boundary; the length check lives in `_verifyPoolProof`.
 ///         2. Step-9 gas measurement — the 256-byte calldata decode and
-///            21-field `PublicInputs` repack on top of the raw `verifyProof`
+///            19-field `PublicInputs` repack on top of the raw `verifyProof`
 ///            cost. This is the path actually executed inside `transact`,
 ///            with `address(this)` already warm.
 ///

@@ -52,11 +52,8 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         ShieldedPool.PublicInputs memory pi = _readPublicInputs();
 
         (uint[2] memory pA, uint[2][2] memory pB, uint[2] memory pC) = _splitProof(poolProof);
-        uint[21] memory pub = _packPub(pi);
+        uint[19] memory pub = _packPub(pi);
 
-        // PoolGroth16Verifier.verifyProof is inherited by ShieldedPool, so it
-        // is callable as an external view on the system-contract address.
-        // See Section 5.5: VK is embedded in the system contract bytecode.
         bool ok = pool.verifyProof(pA, pB, pC, pub);
         assertTrue(ok, "valid proof must verify");
     }
@@ -68,7 +65,7 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         poolProof[200] = bytes1(uint8(poolProof[200]) ^ 0x01);
 
         (uint[2] memory pA, uint[2][2] memory pB, uint[2] memory pC) = _splitProof(poolProof);
-        uint[21] memory pub = _packPub(pi);
+        uint[19] memory pub = _packPub(pi);
 
         bool ok = pool.verifyProof(pA, pB, pC, pub);
         assertFalse(ok, "tampered proof must not verify");
@@ -80,50 +77,28 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         pi.noteCommitmentRoot = PoseidonFieldLib.FIELD_MODULUS;
 
         (uint[2] memory pA, uint[2][2] memory pB, uint[2] memory pC) = _splitProof(poolProof);
-        uint[21] memory pub = _packPub(pi);
+        uint[19] memory pub = _packPub(pi);
 
         bool ok = pool.verifyProof(pA, pB, pC, pub);
         assertFalse(ok, "non-canonical input must not verify");
     }
 
-    /// @notice Positive coverage for the full _verifyPoolProof code path:
-    ///         256-byte calldata decode + 21-field repack + warm self-
-    ///         staticcall to verifyProof. This is the path executed inside
-    ///         transact at step 9 — exercising it directly via the harness
-    ///         catches breakage in the decode/repack glue that the typed
-    ///         `verifyProof` test (`testInlinePoolVerifyAcceptsValidProof`)
-    ///         skips.
     function testInlinePoolVerifyAcceptsValidProofViaHarness() public {
         vm.etch(POOL_ADDRESS, type(ShieldedPoolStepNineHarness).runtimeCode);
         ShieldedPoolStepNineHarness harness = ShieldedPoolStepNineHarness(POOL_ADDRESS);
         bytes memory poolProof = vm.parseBytes(stdJson.readString(session, ".pool.proofHex"));
         ShieldedPool.PublicInputs memory pi = _readPublicInputs();
-
-        // No expectRevert — must complete cleanly.
         harness.exposeVerifyPoolProof(poolProof, pi);
     }
 
-    /// @notice Malformed proof encoding (wrong byte length) cannot be
-    ///         expressed via the typed `verifyProof` form because the
-    ///         envelope has already been decoded; the length check lives in
-    ///         `_verifyPoolProof`. Etch ShieldedPoolStepNineHarness to expose
-    ///         that helper.
     function testInlinePoolVerifyRejectsMalformedProofEncoding() public {
         vm.etch(POOL_ADDRESS, type(ShieldedPoolStepNineHarness).runtimeCode);
         ShieldedPoolStepNineHarness harness = ShieldedPoolStepNineHarness(POOL_ADDRESS);
         ShieldedPool.PublicInputs memory pi = _readPublicInputs();
-
-        // 255 bytes — one byte short of the spec's 256-byte Groth16 envelope.
         vm.expectRevert(ShieldedPool.PoolProofRejected.selector);
         harness.exposeVerifyPoolProof(new bytes(255), pi);
     }
 
-    /// @notice Real-proof negative test on a public input that's not range-
-    ///         or accepted-root-checked before step 9 (`nullifier0`).
-    ///         Exercises the inlined verifier's `checkField` — same code
-    ///         path used inside `transact`. The full transact-flow negative
-    ///         test (with deposits, registrations, accepted roots) lives in
-    ///         TransactDemoAuth.t.sol where that setup is built.
     function testInlinePoolVerifyRejectsNoncanonicalNullifier() public {
         bytes memory poolProof = vm.parseBytes(stdJson.readString(session, ".pool.proofHex"));
         ShieldedPool.PublicInputs memory pi = _readPublicInputs();
@@ -159,35 +134,20 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
 
     // --------------------- Layer 2: contract-flow tests ----------------------
 
-    /// @dev Deterministic always-accept verifier so `transact()` end-to-end
-    ///      can be exercised without a real-proof witness. We swap in
-    ///      ShieldedPoolAcceptAllHarness at POOL_ADDRESS (overrides
-    ///      `_verifyPoolProof` to no-op) and an always-accept auth verifier
-    ///      at the registered `authVerifier` address.
     function testTransactWithMockVerifiersUpdatesAllRoots() public {
         AcceptAllAuthVerifier alwaysAcceptAuth = new AcceptAllAuthVerifier();
         vm.etch(POOL_ADDRESS, type(ShieldedPoolAcceptAllHarness).runtimeCode);
 
-        // Register a sender so transact's pre-checks (registry-root nonzero,
-        // not stale) all hold. The witness root requirement isn't exercised
-        // here because the precompile mock accepts any proof.
+        // Register a sender so transact's pre-checks all hold.
         address sender = address(0x1234);
         uint256 senderOnk = uint256(keccak256("sender owner nullifier key hash")) % PoseidonFieldLib.FIELD_MODULUS;
         uint256 senderSeed = uint256(keccak256("sender note secret seed hash")) % PoseidonFieldLib.FIELD_MODULUS;
+        uint256 policySet = uint256(keccak256("policy set commitment")) % PoseidonFieldLib.FIELD_MODULUS;
         vm.prank(sender);
-        pool.registerUser(senderOnk, senderSeed);
-        vm.prank(sender);
-        pool.registerAuthPolicy(uint256(keccak256("policy commitment")) % PoseidonFieldLib.FIELD_MODULUS);
+        pool.setAuthPolicy(senderOnk, senderSeed, policySet);
 
-        (
-            uint256 noteRootBefore,
-            uint256 userRootBefore,
-            uint256 authRegRootBefore,
-            uint256 authRevRootBefore
-        ) = pool.getCurrentRoots();
+        (uint256 noteRootBefore, uint256 authPolicyRootBefore) = pool.getCurrentRoots();
 
-        // Use real on-chain roots in the public inputs so the precompile
-        // would have something to compare against (the mock ignores it).
         ShieldedPool.PublicInputs memory pi = ShieldedPool.PublicInputs({
             noteCommitmentRoot: noteRootBefore,
             nullifier0: 0x111,
@@ -199,11 +159,9 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
             publicRecipientAddress: 0,
             publicTokenAddress: 0,
             intentReplayId: 0xdeadbeef,
-            registryRoot: userRootBefore,
             validUntilSeconds: uint256(block.timestamp + 600),
             executionChainId: block.chainid,
-            authPolicyRegistrationRoot: authRegRootBefore,
-            authPolicyRevocationRoot: authRevRootBefore,
+            authPolicyRoot: authPolicyRootBefore,
             outputNoteDataHash0: uint256(keccak256("o0")) % PoseidonFieldLib.FIELD_MODULUS,
             outputNoteDataHash1: uint256(keccak256("o1")) % PoseidonFieldLib.FIELD_MODULUS,
             outputNoteDataHash2: uint256(keccak256("o2")) % PoseidonFieldLib.FIELD_MODULUS,
@@ -216,81 +174,131 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         bytes memory dummyAuth = new bytes(256);
         pool.transact(dummyProof, dummyAuth, pi, "o0", "o1", "o2");
 
-        (uint256 noteRootAfter,,, ) = pool.getCurrentRoots();
+        (uint256 noteRootAfter,) = pool.getCurrentRoots();
         assertTrue(noteRootAfter != noteRootBefore, "note tree must advance after transact");
         assertTrue(pool.isNullifierSpent(0x111));
         assertTrue(pool.isNullifierSpent(0x222));
         assertTrue(pool.isIntentReplayIdUsed(0xdeadbeef));
     }
 
-    function testRegisterUserAdvancesUserRegistryRoot() public {
-        (, uint256 before,,) = pool.getCurrentRoots();
+    function testSetAuthPolicyFirstCallAssignsLeafPositionOne() public {
         address user = address(0xABCD);
         vm.prank(user);
-        pool.registerUser(123, 456);
-        (, uint256 afterRoot,,) = pool.getCurrentRoots();
-        assertTrue(afterRoot != before, "user registry root must advance");
-        (bool reg, uint256 onk, uint256 seed) = pool.getUserRegistryEntry(user);
+        uint256 leafPos = pool.setAuthPolicy(123, 456, 789);
+        assertEq(leafPos, 1, "first setAuthPolicy from any address gets slot 1");
+
+        (bool reg, ShieldedPool.UserEntry memory entry) = pool.getAuthPolicyEntry(user);
         assertTrue(reg);
-        assertEq(onk, 123);
-        assertEq(seed, 456);
+        assertEq(entry.leafPosition, 1);
+        assertEq(entry.ownerNullifierKeyHash, 123);
+        assertEq(entry.noteSecretSeedHash, 456);
+        assertEq(entry.policySetCommitment, 789);
     }
 
-    function testRegisterAuthPolicyAppendsAndAdvancesRoot() public {
+    function testSetAuthPolicySecondAddressGetsSlotTwo() public {
+        vm.prank(address(0xAA));
+        uint256 first = pool.setAuthPolicy(0xa1, 0xa2, 0xa3);
+        vm.prank(address(0xBB));
+        uint256 second = pool.setAuthPolicy(0xb1, 0xb2, 0xb3);
+        assertEq(first, 1);
+        assertEq(second, 2);
+    }
+
+    function testSetAuthPolicyAllowsRotationOfSeedAndPolicySet() public {
         address user = address(0xABCD);
         vm.prank(user);
-        pool.registerUser(123, 456);
-        (,, uint256 before,) = pool.getCurrentRoots();
-
+        pool.setAuthPolicy(0xa1, 0xa2, 0xa3);
         vm.prank(user);
-        uint256 leafPos = pool.registerAuthPolicy(789);
-        assertEq(leafPos, 0, "first registration position");
+        pool.setAuthPolicy(0xa1, 0xb2, 0xb3); // same onkHash, rotated seed + policy set
 
-        (,, uint256 afterRoot,) = pool.getCurrentRoots();
-        assertTrue(afterRoot != before, "auth-policy registration root must advance");
-
-        vm.prank(user);
-        uint256 leafPos2 = pool.registerAuthPolicy(101112);
-        assertEq(leafPos2, 1, "second position");
+        (, ShieldedPool.UserEntry memory entry) = pool.getAuthPolicyEntry(user);
+        assertEq(entry.ownerNullifierKeyHash, 0xa1, "ownerNullifierKeyHash must be unchanged");
+        assertEq(entry.noteSecretSeedHash, 0xb2, "noteSecretSeedHash rotated");
+        assertEq(entry.policySetCommitment, 0xb3, "policySetCommitment rotated");
     }
 
-    function testDeregisterAuthPolicyRevertsOnNonOwner() public {
-        address userA = address(0xAA);
-        address userB = address(0xBB);
-        vm.prank(userA);
-        pool.registerUser(0xa1, 0xa2);
-        vm.prank(userA);
-        uint256 leafPos = pool.registerAuthPolicy(0xa3);
+    function testSetAuthPolicyRevertsOnOwnerNullifierKeyHashImmutable() public {
+        address user = address(0xABCD);
+        vm.prank(user);
+        pool.setAuthPolicy(0xa1, 0xa2, 0xa3);
+        vm.prank(user);
+        vm.expectRevert(ShieldedPool.OwnerNullifierKeyHashImmutable.selector);
+        pool.setAuthPolicy(0xa9, 0xa2, 0xa3); // different onkHash on second call
+    }
 
-        vm.prank(userB);
-        pool.registerUser(0xb1, 0xb2);
-        vm.prank(userB);
-        vm.expectRevert(ShieldedPool.AuthPolicyNotOwned.selector);
-        pool.deregisterAuthPolicy(leafPos);
-
+    function testSetAuthPolicyRevertsOnDuplicateOwnerNullifierKeyHash() public {
+        address userA = address(0xA1);
+        address userB = address(0xB2);
+        uint256 dup = 0xCAFE;
         vm.prank(userA);
-        pool.deregisterAuthPolicy(leafPos);
-        assertTrue(pool.isRevokedAuthPolicy(leafPos));
+        pool.setAuthPolicy(dup, 0x1234, 0x5678);
+        vm.prank(userB);
+        vm.expectRevert(ShieldedPool.OwnerNullifierKeyHashAlreadyUsed.selector);
+        pool.setAuthPolicy(dup, 0x9abc, 0xdef0);
+    }
+
+    function testSetAuthPolicyRevertsOnReservedZeroOwnerNullifierKeyHash() public {
+        vm.expectRevert(ShieldedPool.ReservedOwnerNullifierKeyHash.selector);
+        pool.setAuthPolicy(0, 0x1234, 0x5678);
+    }
+
+    function testSetAuthPolicyRevertsOnReservedDummyOwnerNullifierKeyHash() public {
+        uint256 dummy = PoseidonFieldLib.dummyOwnerNullifierKeyHash();
+        vm.expectRevert(ShieldedPool.ReservedOwnerNullifierKeyHash.selector);
+        pool.setAuthPolicy(dummy, 0x1234, 0x5678);
+    }
+
+    function testSetAuthPolicyRevertsOnZeroNoteSecretSeedHash() public {
+        vm.expectRevert(ShieldedPool.ZeroNoteSecretSeedHash.selector);
+        pool.setAuthPolicy(0x1234, 0, 0x5678);
+    }
+
+    function testSetAuthPolicyRevertsOnNonCanonicalOwnerNullifierKeyHash() public {
+        vm.expectRevert(ShieldedPool.FieldElementNotCanonical.selector);
+        pool.setAuthPolicy(PoseidonFieldLib.FIELD_MODULUS, 0x1234, 0x5678);
+    }
+
+    function testSetAuthPolicyRevertsOnNonCanonicalPolicySetCommitment() public {
+        vm.expectRevert(ShieldedPool.FieldElementNotCanonical.selector);
+        pool.setAuthPolicy(0x1234, 0x5678, PoseidonFieldLib.FIELD_MODULUS);
+    }
+
+    function testGetAuthPolicyEntryReturnsZeroForUnregistered() public view {
+        // Section 5.3 normative: for an unregistered address `entry` MUST be
+        // the zero-valued UserEntry and `registered` MUST be false.
+        (bool registered, ShieldedPool.UserEntry memory entry) =
+            pool.getAuthPolicyEntry(address(0xFEED));
+        assertFalse(registered, "unregistered address must report registered=false");
+        assertEq(entry.leafPosition, 0, "leafPosition must be zero for unregistered");
+        assertEq(entry.ownerNullifierKeyHash, 0, "ownerNullifierKeyHash must be zero for unregistered");
+        assertEq(entry.noteSecretSeedHash, 0, "noteSecretSeedHash must be zero for unregistered");
+        assertEq(entry.policySetCommitment, 0, "policySetCommitment must be zero for unregistered");
+    }
+
+    function testSetAuthPolicyRevertsTreeFull() public {
+        // nextLeafPosition is storage slot 5 (verified via `forge inspect
+        // ShieldedPool storage-layout`). The `require(newPosition <=
+        // MAX_LEAF_INDEX, TreeFull)` gate in setAuthPolicy must reject the
+        // first value > 2^32 - 1.
+        vm.store(POOL_ADDRESS, bytes32(uint256(5)), bytes32(uint256(1) << 32));
+
+        vm.prank(address(0xC0DE));
+        vm.expectRevert(ShieldedPool.TreeFull.selector);
+        pool.setAuthPolicy(0xa1, 0xa2, 0xa3);
     }
 
     function testDepositAdvancesNoteCommitmentRoot() public {
-        (uint256 before,,, ) = pool.getCurrentRoots();
+        (uint256 before,) = pool.getCurrentRoots();
         uint256 ownerCommitment = uint256(keccak256("owner commitment")) % PoseidonFieldLib.FIELD_MODULUS;
         vm.deal(address(this), 1 ether);
         pool.deposit{value: 1 ether}(address(0), 1 ether, ownerCommitment, "delivery payload");
-        (uint256 afterRoot,,, ) = pool.getCurrentRoots();
+        (uint256 afterRoot,) = pool.getCurrentRoots();
         assertTrue(afterRoot != before, "deposit must advance note tree");
         assertEq(address(pool).balance, 1 ether);
     }
 
     // ----------------------- Layer 2: negative tests -------------------------
 
-    /// @dev Etches ShieldedPoolAcceptAllHarness at POOL_ADDRESS to bypass
-    ///      `_verifyPoolProof`, registers a sender, and deploys an
-    ///      always-accept auth verifier. Returns a fully populated
-    ///      `PublicInputs` struct that — as-is — would make `transact` succeed
-    ///      with mock verifiers. Tests then mutate one field to exercise a
-    ///      single negative path.
     function _setupForTransact()
         internal
         returns (
@@ -304,10 +312,9 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         address sender = address(0x1234);
         uint256 senderOnk = uint256(keccak256("sender onk")) % PoseidonFieldLib.FIELD_MODULUS;
         uint256 senderSeed = uint256(keccak256("sender seed")) % PoseidonFieldLib.FIELD_MODULUS;
+        uint256 policySet = uint256(keccak256("sender policy set")) % PoseidonFieldLib.FIELD_MODULUS;
         vm.prank(sender);
-        pool.registerUser(senderOnk, senderSeed);
-        vm.prank(sender);
-        pool.registerAuthPolicy(uint256(keccak256("policy")) % PoseidonFieldLib.FIELD_MODULUS);
+        pool.setAuthPolicy(senderOnk, senderSeed, policySet);
 
         pi = _basePI(address(acceptAuth));
     }
@@ -317,12 +324,7 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         view
         returns (ShieldedPool.PublicInputs memory pi)
     {
-        (
-            uint256 noteRoot,
-            uint256 userRoot,
-            uint256 authRegRoot,
-            uint256 authRevRoot
-        ) = pool.getCurrentRoots();
+        (uint256 noteRoot, uint256 authPolicyRoot) = pool.getCurrentRoots();
         pi = ShieldedPool.PublicInputs({
             noteCommitmentRoot: noteRoot,
             nullifier0: 0x111,
@@ -334,11 +336,9 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
             publicRecipientAddress: 0,
             publicTokenAddress: 0,
             intentReplayId: 0xdeadbeef,
-            registryRoot: userRoot,
             validUntilSeconds: uint256(block.timestamp + 600),
             executionChainId: block.chainid,
-            authPolicyRegistrationRoot: authRegRoot,
-            authPolicyRevocationRoot: authRevRoot,
+            authPolicyRoot: authPolicyRoot,
             outputNoteDataHash0: uint256(keccak256("o0")) % PoseidonFieldLib.FIELD_MODULUS,
             outputNoteDataHash1: uint256(keccak256("o1")) % PoseidonFieldLib.FIELD_MODULUS,
             outputNoteDataHash2: uint256(keccak256("o2")) % PoseidonFieldLib.FIELD_MODULUS,
@@ -349,9 +349,6 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
     }
 
     function testTransactRevertsWhenAuthVerifierHasNoCode() public {
-        // Use a fresh address with no bytecode as the registered authVerifier.
-        // Range and zero checks pass (it's a non-zero <2^160 address); the new
-        // code-length guard inside _verifyAuthProof must fire.
         address noCodeVerifier = address(0xC0dE0000c0De0000C0DE0000c0De0000c0DE0000);
         (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
         pi.authVerifier = uint256(uint160(noCodeVerifier));
@@ -409,7 +406,6 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
     }
 
     function testTransactRevertsIntentExpiredPast() public {
-        // Push timestamp forward so we have a "past" value.
         vm.warp(1000);
         (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
         pi.validUntilSeconds = block.timestamp - 1;
@@ -419,8 +415,6 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
     }
 
     function testTransactRevertsIntentExpiredAtUint32Boundary() public {
-        // Spec says `validUntilSeconds < 2^32`; contract uses
-        // `<= type(uint32).max` (== 2^32 - 1). So 2^32 must revert.
         (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
         pi.validUntilSeconds = uint256(1) << 32;
 
@@ -455,11 +449,8 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
 
     function testTransactRevertsIntentReplayIdAlreadyUsed() public {
         (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
-        // First call succeeds.
         pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
 
-        // Reuse the same intentReplayId; rotate other fields so we don't trip
-        // a different revert first (nullifiers are also single-use).
         pi.nullifier0 = 0x333;
         pi.nullifier1 = 0x444;
 
@@ -469,7 +460,6 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
 
     function testTransactRevertsInvalidOutputNoteDataHash() public {
         (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
-        // Mismatched payload for slot 0: hash says "o0" but bytes say "OOPS".
         vm.expectRevert(
             abi.encodeWithSelector(ShieldedPool.InvalidOutputNoteDataHash.selector, uint8(0))
         );
@@ -485,144 +475,128 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
     }
 
-    function testTransactRevertsZeroRegistryRoot() public {
+    function testTransactAcceptsHistoricalNoteCommitmentRoot() public {
+        // Section 3.5 requires the verifier to accept any noteCommitmentRoot
+        // from the last NOTE_COMMITMENT_ROOT_HISTORY_SIZE (= 500) roots, not
+        // just the current tip.
         (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
-        pi.registryRoot = 0;
+        uint256 historicalNoteRoot = pi.noteCommitmentRoot;
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
 
-        vm.expectRevert(ShieldedPool.ZeroRegistryRoot.selector);
+        (uint256 noteRootAfter,) = pool.getCurrentRoots();
+        assertTrue(noteRootAfter != historicalNoteRoot, "first transact must advance note tree");
+
+        // Second transact reuses the pre-first-transact root. Fresh nullifiers
+        // / intentReplayId / outputs avoid collisions with the first call.
+        pi.noteCommitmentRoot = historicalNoteRoot;
+        pi.nullifier0 = 0x333;
+        pi.nullifier1 = 0x444;
+        pi.intentReplayId = 0xfeedface;
+        pi.outputNoteDataHash0 = uint256(keccak256("h0")) % PoseidonFieldLib.FIELD_MODULUS;
+        pi.outputNoteDataHash1 = uint256(keccak256("h1")) % PoseidonFieldLib.FIELD_MODULUS;
+        pi.outputNoteDataHash2 = uint256(keccak256("h2")) % PoseidonFieldLib.FIELD_MODULUS;
+        pool.transact(new bytes(256), new bytes(256), pi, "h0", "h1", "h2");
+    }
+
+    function testTransactRevertsOnEvictedNoteCommitmentRoot() public {
+        // Section 3.5: the note-root history is a 500-entry ring buffer; once
+        // a root has been overwritten by NOTE_COMMITMENT_ROOT_HISTORY_SIZE (=
+        // 500) subsequent pushes it is no longer accepted. The transact path
+        // must surface that with UnknownNoteCommitmentRoot.
+        (uint256 genesisRoot,) = pool.getCurrentRoots();
+        uint256 ownerCommitment = uint256(keccak256("evict-oc")) % PoseidonFieldLib.FIELD_MODULUS;
+        vm.deal(address(this), 1 ether);
+
+        // First deposit pushes genesisRoot into slot 0 (count becomes 1).
+        pool.deposit{value: 1 wei}(address(0), 1, ownerCommitment, "");
+
+        // Bookkeeping skip-ahead: bump noteCommitmentRootHistoryCount to 500
+        // so the next push lands at slot 500 % 500 = 0, overwriting genesis.
+        // Slot 2 verified via `forge inspect ShieldedPool storage-layout`.
+        vm.store(POOL_ADDRESS, bytes32(uint256(2)), bytes32(uint256(500)));
+
+        // Second deposit triggers the wraparound at slot 0.
+        pool.deposit{value: 1 wei}(address(0), 1, ownerCommitment + 1, "");
+
+        assertFalse(
+            pool.isAcceptedNoteCommitmentRoot(genesisRoot),
+            "post-wraparound: genesis root must no longer be accepted"
+        );
+
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.noteCommitmentRoot = genesisRoot;
+        vm.expectRevert(ShieldedPool.UnknownNoteCommitmentRoot.selector);
         pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
     }
 
-    function testTransactRevertsUnknownUserRegistryRoot() public {
+    function testTransactRevertsZeroAuthPolicyRoot() public {
         (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
-        pi.registryRoot = uint256(keccak256("not in history"))
+        pi.authPolicyRoot = 0;
+
+        vm.expectRevert(ShieldedPool.ZeroAuthPolicyRoot.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
+    function testTransactRevertsUnknownAuthPolicyRoot() public {
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.authPolicyRoot = uint256(keccak256("not in history"))
             % PoseidonFieldLib.FIELD_MODULUS;
 
-        vm.expectRevert(ShieldedPool.UnknownUserRegistryRoot.selector);
+        vm.expectRevert(ShieldedPool.UnknownAuthPolicyRoot.selector);
         pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
     }
 
-    function testTransactRevertsZeroAuthPolicyRegistrationRoot() public {
+    function testTransactRevertsOnExpiredAuthPolicyRoot() public {
+        // Section 3.6 / Section 5.4.1: roots fall out of the verifier's
+        // accepted set once `block.number - snapshotBlock` exceeds
+        // AUTH_POLICY_ROOT_HISTORY_BLOCKS (= 64).
         (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
-        pi.authPolicyRegistrationRoot = 0;
+        uint256 expiringRoot = pi.authPolicyRoot;
 
-        vm.expectRevert(ShieldedPool.ZeroRegistrationRoot.selector);
+        // Bump the current root via a second setAuthPolicy in a later block,
+        // so `expiringRoot` is no longer the current root and gets a fresh
+        // snapshot entry attached to this newer block.
+        vm.roll(block.number + 1);
+        vm.prank(address(0xDEAD));
+        pool.setAuthPolicy(0xbeef, 0xface, 0xcafe);
+        (, uint256 newRoot) = pool.getCurrentRoots();
+        assertTrue(newRoot != expiringRoot, "second setAuthPolicy must advance authPolicyRoot");
+
+        // Advance past the 64-block freshness window. AUTH_POLICY_ROOT_HISTORY_BLOCKS
+        // is internal, so hard-code the matching constant here.
+        vm.roll(block.number + 65);
+
+        pi.authPolicyRoot = expiringRoot;
+        vm.expectRevert(ShieldedPool.UnknownAuthPolicyRoot.selector);
         pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
     }
 
-    function testTransactRevertsUnknownAuthPolicyRegistrationRoot() public {
+    function testTransactAcceptsHistoricalAuthPolicyRootInWindow() public {
+        // Section 3.6: an authPolicyRoot that's no longer current must still
+        // be accepted by transact if it was snapshotted within the last
+        // AUTH_POLICY_ROOT_HISTORY_BLOCKS (= 64) blocks.
         (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
-        pi.authPolicyRegistrationRoot = uint256(keccak256("not in history"))
-            % PoseidonFieldLib.FIELD_MODULUS;
+        uint256 olderRoot = pi.authPolicyRoot;
 
-        vm.expectRevert(ShieldedPool.UnknownAuthPolicyRegistrationRoot.selector);
+        // Bump current root via a second setAuthPolicy in a later block; the
+        // older root is now in history attached to that later block number.
+        vm.roll(block.number + 1);
+        vm.prank(address(0xDEAD));
+        pool.setAuthPolicy(0xbeef, 0xface, 0xcafe);
+        (, uint256 newRoot) = pool.getCurrentRoots();
+        assertTrue(newRoot != olderRoot, "second setAuthPolicy must advance authPolicyRoot");
+
+        // Stay within the 64-block freshness window.
+        vm.roll(block.number + 10);
+
+        assertTrue(
+            pool.isAcceptedAuthPolicyRoot(olderRoot),
+            "10-block-old root must remain accepted"
+        );
+
+        // End-to-end: transact must succeed with the in-window historical root.
+        pi.authPolicyRoot = olderRoot;
         pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
-    }
-
-    function testTransactRevertsZeroAuthPolicyRevocationRoot() public {
-        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
-        pi.authPolicyRevocationRoot = 0;
-
-        vm.expectRevert(ShieldedPool.ZeroRevocationRoot.selector);
-        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
-    }
-
-    function testTransactRevertsUnknownAuthPolicyRevocationRoot() public {
-        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
-        pi.authPolicyRevocationRoot = uint256(keccak256("not in history"))
-            % PoseidonFieldLib.FIELD_MODULUS;
-
-        vm.expectRevert(ShieldedPool.UnknownAuthPolicyRevocationRoot.selector);
-        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
-    }
-
-    function testRegisterUserRevertsOnDuplicateOwnerNullifierKeyHash() public {
-        address userA = address(0xA1);
-        address userB = address(0xB2);
-        uint256 dup = 0xCAFE;
-        vm.prank(userA);
-        pool.registerUser(dup, 0x1234);
-
-        vm.prank(userB);
-        vm.expectRevert(ShieldedPool.OwnerNullifierKeyHashAlreadyUsed.selector);
-        pool.registerUser(dup, 0x5678);
-    }
-
-    function testRegisterUserRevertsOnReservedZeroOwnerNullifierKeyHash() public {
-        vm.expectRevert(ShieldedPool.ReservedOwnerNullifierKeyHash.selector);
-        pool.registerUser(0, 0x1234);
-    }
-
-    function testRegisterUserRevertsOnReservedDummyOwnerNullifierKeyHash() public {
-        uint256 dummy = PoseidonFieldLib.dummyOwnerNullifierKeyHash();
-        vm.expectRevert(ShieldedPool.ReservedOwnerNullifierKeyHash.selector);
-        pool.registerUser(dummy, 0x1234);
-    }
-
-    function testRegisterUserRevertsOnNonCanonicalFieldElement() public {
-        vm.expectRevert(ShieldedPool.FieldElementNotCanonical.selector);
-        pool.registerUser(PoseidonFieldLib.FIELD_MODULUS, 0x1234);
-    }
-
-    function testRegisterUserRevertsOnSecondRegistrationFromSameAddress() public {
-        address user = address(0xABCD);
-        vm.prank(user);
-        pool.registerUser(0x1111, 0x2222);
-        vm.prank(user);
-        vm.expectRevert(ShieldedPool.UserAlreadyRegistered.selector);
-        pool.registerUser(0x3333, 0x4444);
-    }
-
-    function testRegisterAuthPolicyRevertsOnZeroPolicyCommitment() public {
-        address user = address(0xABCD);
-        vm.prank(user);
-        pool.registerUser(0x1111, 0x2222);
-
-        vm.prank(user);
-        vm.expectRevert(ShieldedPool.InvalidPolicyCommitment.selector);
-        pool.registerAuthPolicy(0);
-    }
-
-    function testRegisterAuthPolicyRevertsOnNonCanonicalFieldElement() public {
-        address user = address(0xABCD);
-        vm.prank(user);
-        pool.registerUser(0x1111, 0x2222);
-
-        vm.prank(user);
-        vm.expectRevert(ShieldedPool.FieldElementNotCanonical.selector);
-        pool.registerAuthPolicy(PoseidonFieldLib.FIELD_MODULUS);
-    }
-
-    function testRegisterAuthPolicyRevertsWhenCallerNotRegistered() public {
-        address user = address(0xABCD);
-        vm.prank(user);
-        vm.expectRevert(ShieldedPool.UserNotRegistered.selector);
-        pool.registerAuthPolicy(0x1234);
-    }
-
-    function testDeregisterAuthPolicyRevertsOnLeafPositionOutOfRange() public {
-        address user = address(0xABCD);
-        vm.prank(user);
-        pool.registerUser(0x1111, 0x2222);
-
-        vm.prank(user);
-        vm.expectRevert(ShieldedPool.LeafPositionOutOfRange.selector);
-        pool.deregisterAuthPolicy(uint256(1) << 32);
-    }
-
-    function testDeregisterAuthPolicyRevertsOnDoubleRevoke() public {
-        address user = address(0xABCD);
-        vm.prank(user);
-        pool.registerUser(0x1111, 0x2222);
-        vm.prank(user);
-        uint256 leafPos = pool.registerAuthPolicy(0xa3);
-
-        vm.prank(user);
-        pool.deregisterAuthPolicy(leafPos);
-
-        vm.prank(user);
-        vm.expectRevert(ShieldedPool.AuthPolicyAlreadyRevoked.selector);
-        pool.deregisterAuthPolicy(leafPos);
     }
 
     function testDepositRevertsOnEthAmountMismatch() public {
@@ -656,6 +630,17 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
     }
 
+    function testTransactRevertsOnAuthVerifierStaticcallRevert() public {
+        // Section 5.4.1 step 8: a staticcall failure on the auth verifier must
+        // be treated as AuthProofRejected, not propagated as a generic revert.
+        RevertingAuthVerifier reverter = new RevertingAuthVerifier();
+        (ShieldedPool.PublicInputs memory pi, ) = _setupForTransact();
+        pi.authVerifier = uint256(uint160(address(reverter)));
+
+        vm.expectRevert(ShieldedPool.AuthProofRejected.selector);
+        pool.transact(new bytes(256), new bytes(256), pi, "o0", "o1", "o2");
+    }
+
     // ----------------------------- Helpers -----------------------------------
 
     function _splitProof(bytes memory proof)
@@ -675,7 +660,7 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
     function _packPub(ShieldedPool.PublicInputs memory pi)
         private
         pure
-        returns (uint[21] memory pub)
+        returns (uint[19] memory pub)
     {
         pub[0]  = pi.noteCommitmentRoot;
         pub[1]  = pi.nullifier0;
@@ -687,17 +672,15 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         pub[7]  = pi.publicRecipientAddress;
         pub[8]  = pi.publicTokenAddress;
         pub[9]  = pi.intentReplayId;
-        pub[10] = pi.registryRoot;
-        pub[11] = pi.validUntilSeconds;
-        pub[12] = pi.executionChainId;
-        pub[13] = pi.authPolicyRegistrationRoot;
-        pub[14] = pi.authPolicyRevocationRoot;
-        pub[15] = pi.outputNoteDataHash0;
-        pub[16] = pi.outputNoteDataHash1;
-        pub[17] = pi.outputNoteDataHash2;
-        pub[18] = pi.authVerifier;
-        pub[19] = pi.blindedAuthCommitment;
-        pub[20] = pi.transactionIntentDigest;
+        pub[10] = pi.validUntilSeconds;
+        pub[11] = pi.executionChainId;
+        pub[12] = pi.authPolicyRoot;
+        pub[13] = pi.outputNoteDataHash0;
+        pub[14] = pi.outputNoteDataHash1;
+        pub[15] = pi.outputNoteDataHash2;
+        pub[16] = pi.authVerifier;
+        pub[17] = pi.blindedAuthCommitment;
+        pub[18] = pi.transactionIntentDigest;
     }
 
     function _w(bytes memory src, uint256 offset) private pure returns (uint256 r) {
@@ -705,8 +688,8 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
     }
 
     function _readPublicInputs() private view returns (ShieldedPool.PublicInputs memory pi) {
-        uint256[] memory ps = new uint256[](21);
-        for (uint256 i; i < 21; ++i) {
+        uint256[] memory ps = new uint256[](19);
+        for (uint256 i; i < 19; ++i) {
             ps[i] = stdJson.readUint(
                 session, string.concat(".pool.publicSignals[", vm.toString(i), "]")
             );
@@ -721,17 +704,15 @@ contract IntegrationTest is Test, InstallSystemContractsBase {
         pi.publicRecipientAddress = ps[7];
         pi.publicTokenAddress = ps[8];
         pi.intentReplayId = ps[9];
-        pi.registryRoot = ps[10];
-        pi.validUntilSeconds = ps[11];
-        pi.executionChainId = ps[12];
-        pi.authPolicyRegistrationRoot = ps[13];
-        pi.authPolicyRevocationRoot = ps[14];
-        pi.outputNoteDataHash0 = ps[15];
-        pi.outputNoteDataHash1 = ps[16];
-        pi.outputNoteDataHash2 = ps[17];
-        pi.authVerifier = ps[18];
-        pi.blindedAuthCommitment = ps[19];
-        pi.transactionIntentDigest = ps[20];
+        pi.validUntilSeconds = ps[10];
+        pi.executionChainId = ps[11];
+        pi.authPolicyRoot = ps[12];
+        pi.outputNoteDataHash0 = ps[13];
+        pi.outputNoteDataHash1 = ps[14];
+        pi.outputNoteDataHash2 = ps[15];
+        pi.authVerifier = ps[16];
+        pi.blindedAuthCommitment = ps[17];
+        pi.transactionIntentDigest = ps[18];
     }
 }
 
@@ -755,12 +736,18 @@ contract RejectAllAuthVerifier is IAuthVerifier {
 ///         `_verifyAuthProof` MUST reject any non-32-byte return.
 contract BadReturnAuthVerifier {
     function verifyAuth(bytes calldata, bytes calldata) external pure returns (bool) {
-        // Force a 16-byte raw return regardless of the declared bool return.
-        // ABI-encoded `bool true` would be 32 bytes; this short return must
-        // be rejected by the system contract's `ret.length == 32` guard.
         assembly {
             mstore(0x00, 0x0000000000000000000000000000000100000000000000000000000000000000)
             return(0x00, 16)
         }
+    }
+}
+
+/// @notice Auth verifier whose `verifyAuth` reverts. The pool's staticcall
+///         must surface this as `AuthProofRejected` rather than propagating
+///         the raw revert.
+contract RevertingAuthVerifier is IAuthVerifier {
+    function verifyAuth(bytes calldata, bytes calldata) external pure override returns (bool) {
+        revert();
     }
 }

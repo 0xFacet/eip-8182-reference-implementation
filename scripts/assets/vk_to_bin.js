@@ -4,12 +4,12 @@
 // EIP-8182 system contract bytecode must embed (Section 5.5); see
 // `pool_vk.sha256` for the install-time integrity check.
 //
-// Layout (1856 bytes for the 21-public-input pool circuit):
+// Layout (1728 bytes for the 19-public-input pool circuit):
 //   alpha (G1, 64 B)               : x (32) || y (32)
 //   beta  (G2, 128 B)              : x.c1 (32) || x.c0 (32) || y.c1 (32) || y.c0 (32)
 //   gamma (G2, 128 B)              : same
 //   delta (G2, 128 B)              : same
-//   IC[0..nPublic] (G1, 64 B each) : nPublic+1 = 22 G1 points
+//   IC[0..nPublic] (G1, 64 B each) : nPublic+1 = 20 G1 points
 //
 // G2 byte order matches EIP-197: imaginary part first, then real part.
 // snarkjs stores G2 coordinates as [c0, c1]; this script swaps to [c1, c0].

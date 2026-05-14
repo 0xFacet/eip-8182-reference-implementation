@@ -31,23 +31,12 @@ contract GasBreakdownTest is Test, InstallSystemContractsBase {
         authVerifierAddr = address(authMock);
     }
 
-    function testGas_RegisterUser() public {
+    function testGas_SetAuthPolicy() public {
         vm.prank(address(0xAAAA));
         uint256 gasBefore = gasleft();
-        pool.registerUser(0xa1, 0xa2);
+        pool.setAuthPolicy(0xa1, 0xa2, 0xa3);
         uint256 used = gasBefore - gasleft();
-        emit log_named_uint("registerUser gas", used);
-    }
-
-    function testGas_RegisterAuthPolicy() public {
-        vm.prank(address(0xAAAA));
-        pool.registerUser(0xa1, 0xa2);
-
-        vm.prank(address(0xAAAA));
-        uint256 gasBefore = gasleft();
-        pool.registerAuthPolicy(0xa3);
-        uint256 used = gasBefore - gasleft();
-        emit log_named_uint("registerAuthPolicy gas", used);
+        emit log_named_uint("setAuthPolicy gas", used);
     }
 
     function testGas_Deposit() public {
@@ -61,16 +50,9 @@ contract GasBreakdownTest is Test, InstallSystemContractsBase {
     function testGas_Transact() public {
         // Register prerequisite state cheaply.
         vm.prank(address(0xAAAA));
-        pool.registerUser(0xa1, 0xa2);
-        vm.prank(address(0xAAAA));
-        pool.registerAuthPolicy(0xa3);
+        pool.setAuthPolicy(0xa1, 0xa2, 0xa3);
 
-        (
-            uint256 noteRoot,
-            uint256 userRoot,
-            uint256 authReg,
-            uint256 authRev
-        ) = pool.getCurrentRoots();
+        (uint256 noteRoot, uint256 authPolicyRoot) = pool.getCurrentRoots();
 
         ShieldedPool.PublicInputs memory pi = ShieldedPool.PublicInputs({
             noteCommitmentRoot: noteRoot,
@@ -83,11 +65,9 @@ contract GasBreakdownTest is Test, InstallSystemContractsBase {
             publicRecipientAddress: 0,
             publicTokenAddress: 0,
             intentReplayId: 0xdeadbeef,
-            registryRoot: userRoot,
             validUntilSeconds: uint256(block.timestamp + 600),
             executionChainId: block.chainid,
-            authPolicyRegistrationRoot: authReg,
-            authPolicyRevocationRoot: authRev,
+            authPolicyRoot: authPolicyRoot,
             outputNoteDataHash0: uint256(keccak256("o0")) % PoseidonFieldLib.FIELD_MODULUS,
             outputNoteDataHash1: uint256(keccak256("o1")) % PoseidonFieldLib.FIELD_MODULUS,
             outputNoteDataHash2: uint256(keccak256("o2")) % PoseidonFieldLib.FIELD_MODULUS,

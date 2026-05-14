@@ -1,4 +1,4 @@
-// Section 11 hash-context wrappers. Each is a thin sponge instantiation
+// Section 10 hash-context wrappers. Each is a thin sponge instantiation
 // with the ordered inputs from the spec table.
 
 pragma circom 2.0.0;
@@ -146,15 +146,19 @@ template PolicyCommitment() {
     out <== s.out;
 }
 
-// poseidon(AUTH_POLICY_DOMAIN, user, policyCommitment)
+// poseidon(AUTH_POLICY_DOMAIN, user, ownerNullifierKeyHash, noteSecretSeedHash, policySetCommitment)
 template AuthPolicyLeaf() {
     signal input  user;
-    signal input  policyCommitment;
+    signal input  ownerNullifierKeyHash;
+    signal input  noteSecretSeedHash;
+    signal input  policySetCommitment;
     signal output out;
-    component s = Poseidon2Sponge(3);
+    component s = Poseidon2Sponge(5);
     s.in[0] <== AUTH_POLICY_DOMAIN();
     s.in[1] <== user;
-    s.in[2] <== policyCommitment;
+    s.in[2] <== ownerNullifierKeyHash;
+    s.in[3] <== noteSecretSeedHash;
+    s.in[4] <== policySetCommitment;
     out <== s.out;
 }
 
@@ -170,35 +174,22 @@ template BlindedAuthCommitment() {
     out <== s.out;
 }
 
-// poseidon(USER_REGISTRY_LEAF_DOMAIN, user, ownerNullifierKeyHash, noteSecretSeedHash)
-template UserRegistryLeaf() {
-    signal input  user;
-    signal input  ownerNullifierKeyHash;
-    signal input  noteSecretSeedHash;
-    signal output out;
-    component s = Poseidon2Sponge(4);
-    s.in[0] <== USER_REGISTRY_LEAF_DOMAIN();
-    s.in[1] <== user;
-    s.in[2] <== ownerNullifierKeyHash;
-    s.in[3] <== noteSecretSeedHash;
-    out <== s.out;
-}
-
 // poseidon(TRANSACTION_INTENT_DIGEST_DOMAIN, authVerifier, authorizingAddress,
-//          operationKind, tokenAddress, recipientAddress, amount,
-//          feeRecipientAddress, feeAmount, executionConstraintsFlags,
-//          lockedOutputBinding0, lockedOutputBinding1, lockedOutputBinding2,
-//          nonce, validUntilSeconds, executionChainId)
-//   = 1 (domain) + 15 fields = arity 16
+//          operationKind, tokenAddress, recipientOwnerNullifierKeyHash, amount,
+//          feeNoteRecipientOwnerNullifierKeyHash, feeAmount, publicRecipientAddress,
+//          executionConstraintsFlags, lockedOutputBinding0, lockedOutputBinding1,
+//          lockedOutputBinding2, nonce, validUntilSeconds, executionChainId)
+//   = 1 (domain) + 16 fields = arity 17
 template TransactionIntentDigest() {
     signal input  authVerifier;
     signal input  authorizingAddress;
     signal input  operationKind;
     signal input  tokenAddress;
-    signal input  recipientAddress;
+    signal input  recipientOwnerNullifierKeyHash;
     signal input  amount;
-    signal input  feeRecipientAddress;
+    signal input  feeNoteRecipientOwnerNullifierKeyHash;
     signal input  feeAmount;
+    signal input  publicRecipientAddress;
     signal input  executionConstraintsFlags;
     signal input  lockedOutputBinding0;
     signal input  lockedOutputBinding1;
@@ -207,22 +198,23 @@ template TransactionIntentDigest() {
     signal input  validUntilSeconds;
     signal input  executionChainId;
     signal output out;
-    component s = Poseidon2Sponge(16);
+    component s = Poseidon2Sponge(17);
     s.in[0]  <== TRANSACTION_INTENT_DIGEST_DOMAIN();
     s.in[1]  <== authVerifier;
     s.in[2]  <== authorizingAddress;
     s.in[3]  <== operationKind;
     s.in[4]  <== tokenAddress;
-    s.in[5]  <== recipientAddress;
+    s.in[5]  <== recipientOwnerNullifierKeyHash;
     s.in[6]  <== amount;
-    s.in[7]  <== feeRecipientAddress;
+    s.in[7]  <== feeNoteRecipientOwnerNullifierKeyHash;
     s.in[8]  <== feeAmount;
-    s.in[9]  <== executionConstraintsFlags;
-    s.in[10] <== lockedOutputBinding0;
-    s.in[11] <== lockedOutputBinding1;
-    s.in[12] <== lockedOutputBinding2;
-    s.in[13] <== nonce;
-    s.in[14] <== validUntilSeconds;
-    s.in[15] <== executionChainId;
+    s.in[9]  <== publicRecipientAddress;
+    s.in[10] <== executionConstraintsFlags;
+    s.in[11] <== lockedOutputBinding0;
+    s.in[12] <== lockedOutputBinding1;
+    s.in[13] <== lockedOutputBinding2;
+    s.in[14] <== nonce;
+    s.in[15] <== validUntilSeconds;
+    s.in[16] <== executionChainId;
     out <== s.out;
 }

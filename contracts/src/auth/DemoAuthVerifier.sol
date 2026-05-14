@@ -6,10 +6,10 @@ import {IAuthVerifier} from "../interfaces/IAuthVerifier.sol";
 
 /// @notice Auth verifier contract for the demo auth circuit at
 ///         circuits/auth-demo/auth_demo.circom. Implements the EIP-8182
-///         Section 12 IAuthVerifier interface so the system contract can call
+///         Section 11 IAuthVerifier interface so the system contract can call
 ///         it via `staticcall`.
 ///
-/// @dev    For a production secp256k1 / EIP-712 ECDSA companion (Section 14),
+/// @dev    For a production secp256k1 / EIP-712 ECDSA companion,
 ///         the only contract-side difference is that the underlying
 ///         Groth16Verifier verifies a different circuit; the wrapper
 ///         shape — decode 2 public inputs, decode 256-byte proof, return a

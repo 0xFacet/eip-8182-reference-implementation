@@ -98,27 +98,28 @@ function runQuiet(cmd, args, opts = {}) {
       poolInput1.outLockedOutputBinding[2],
     ],
     intent: {
-      auth_verifier:               BigInt(poolInput1.authVerifier).toString(),
-      authorizing_address:         BigInt(poolInput1.authorizingAddress).toString(),
+      auth_verifier:                                BigInt(poolInput1.authVerifier).toString(),
+      authorizing_address:                          BigInt(poolInput1.authorizingAddress).toString(),
       // Mirror the circuit's derivation: operationKind = 0 iff publicAmountOut == 0.
-      operation_kind:              BigInt(poolInput1.publicAmountOut) === 0n ? "0" : "1",
-      token_address:               BigInt(poolInput1.tokenAddress).toString(),
-      recipient_address:           BigInt(poolInput1.recipientAddress).toString(),
+      operation_kind:                               BigInt(poolInput1.publicAmountOut) === 0n ? "0" : "1",
+      token_address:                                BigInt(poolInput1.tokenAddress).toString(),
+      recipient_owner_nullifier_key_hash:           BigInt(poolInput1.recipientOwnerNullifierKeyHash).toString(),
       // Transfer: amount = outAmount[0] (recipient note). Withdraw: amount = publicAmountOut.
-      amount:                      BigInt(poolInput1.publicAmountOut) === 0n
-                                     ? BigInt(poolInput1.outAmount[0]).toString()
-                                     : BigInt(poolInput1.publicAmountOut).toString(),
-      fee_recipient_address:       BigInt(poolInput1.feeRecipientAddress).toString(),
-      fee_amount:                  BigInt(poolInput1.feeAmount).toString(),
-      execution_constraints_flags: BigInt(poolInput1.executionConstraintsFlags).toString(),
-      locked_output_binding0:      BigInt(poolInput1.outLockedOutputBinding[0]).toString(),
-      locked_output_binding1:      BigInt(poolInput1.outLockedOutputBinding[1]).toString(),
-      locked_output_binding2:      BigInt(poolInput1.outLockedOutputBinding[2]).toString(),
+      amount:                                       BigInt(poolInput1.publicAmountOut) === 0n
+                                                     ? BigInt(poolInput1.outAmount[0]).toString()
+                                                     : BigInt(poolInput1.publicAmountOut).toString(),
+      fee_note_recipient_owner_nullifier_key_hash:  BigInt(poolInput1.feeNoteRecipientOwnerNullifierKeyHash).toString(),
+      fee_amount:                                   BigInt(poolInput1.feeAmount).toString(),
+      public_recipient_address:                     BigInt(poolInput1.publicRecipientAddress).toString(),
+      execution_constraints_flags:                  BigInt(poolInput1.executionConstraintsFlags).toString(),
+      locked_output_binding0:                       BigInt(poolInput1.outLockedOutputBinding[0]).toString(),
+      locked_output_binding1:                       BigInt(poolInput1.outLockedOutputBinding[1]).toString(),
+      locked_output_binding2:                       BigInt(poolInput1.outLockedOutputBinding[2]).toString(),
       // 32-byte nonce hex; the gen script expects bytes form. Convert from the
       // pool's Field nonce by zero-padding to 32 bytes BE.
       nonce_bytes: bigintToBytesArr(BigInt(poolInput1.nonce), 32),
-      valid_until_seconds:         BigInt(poolInput1.validUntilSeconds).toString(),
-      execution_chain_id:          BigInt(poolInput1.executionChainId).toString(),
+      valid_until_seconds:                          BigInt(poolInput1.validUntilSeconds).toString(),
+      execution_chain_id:                           BigInt(poolInput1.executionChainId).toString(),
     },
   };
   // Convert intent fields from string back to BigInt-form for the gen_prover_toml.js
@@ -154,6 +155,14 @@ function runQuiet(cmd, args, opts = {}) {
   // Need a VK for prove; regenerate to be safe (cheap).
   run("bb", ["write_vk", "--scheme", "ultra_honk", "-b", "target/auth.json", "-t", "evm",
     "-o", "target"], { cwd: NOIR_AUTH_DIR });
+  // Regenerate the Solidity verifier so contracts/src/auth/HonkRealAuthVerifier.sol
+  // stays in lockstep with the Noir circuit.
+  run("bb", ["write_solidity_verifier", "--scheme", "ultra_honk",
+    "-k", "target/vk", "-o", "target/HonkVerifier.sol"], { cwd: NOIR_AUTH_DIR });
+  fs.copyFileSync(
+    path.join(NOIR_AUTH_DIR, "target/HonkVerifier.sol"),
+    path.join(ROOT, "contracts/src/auth/HonkRealAuthVerifier.sol"),
+  );
   const t1 = Date.now();
   run("bb", ["prove", "--scheme", "ultra_honk", "-b", "target/auth.json",
     "-w", "target/auth.gz", "-o", "target", "-t", "evm"], { cwd: NOIR_AUTH_DIR });
@@ -182,18 +191,18 @@ function runQuiet(cmd, args, opts = {}) {
   const authBlinded = "0x" + authPublicsBuf.subarray(0, 32).toString("hex");
   const authDigest  = "0x" + authPublicsBuf.subarray(32, 64).toString("hex");
 
-  // Sanity: pool public signals 19 (blinded) and 20 (intent digest) must
+  // Sanity: pool public signals 17 (blinded) and 18 (intent digest) must
   // match the auth public inputs.
-  const ps19 = BigInt(poolPublics[19]);
-  const ps20 = BigInt(poolPublics[20]);
-  if (BigInt(authBlinded) !== ps19) {
+  const ps17 = BigInt(poolPublics[17]);
+  const ps18 = BigInt(poolPublics[18]);
+  if (BigInt(authBlinded) !== ps17) {
     throw new Error(
-      `blinded mismatch: auth=${BigInt(authBlinded)} pool=${ps19}`,
+      `blinded mismatch: auth=${BigInt(authBlinded)} pool=${ps17}`,
     );
   }
-  if (BigInt(authDigest) !== ps20) {
+  if (BigInt(authDigest) !== ps18) {
     throw new Error(
-      `intent digest mismatch: auth=${BigInt(authDigest)} pool=${ps20}`,
+      `intent digest mismatch: auth=${BigInt(authDigest)} pool=${ps18}`,
     );
   }
   console.log("    pool/auth public-input agreement OK");

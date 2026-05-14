@@ -5,7 +5,7 @@
 //   intent.transactionIntentDigest({...}) — Section 9.10 digest
 //   intent.intentReplayId(...)            — Section 9.8
 //   intent.ownerCommitment / noteBodyCommitment / noteCommitment / nullifier
-//   intent.userRegistryLeaf / authPolicyLeaf / policyCommitment / blindedAuthCommitment
+//   intent.authPolicyLeaf / policyCommitment / blindedAuthCommitment
 //   proof.snarkjsProofToBytes(snarkjsProof) → 256-byte Buffer
 //   proof.bytesToSnarkjsProof(buf)         → snarkjs proof JSON
 //   proof.vkJsonToBytes(snarkjsVk)         → canonical pool_vk.bin Buffer

@@ -50,23 +50,24 @@ function run(cmd, args, opts = {}) {
     ? poolInput.outAmount[0]
     : poolInput.publicAmountOut;
   const sharedIntent = {
-    authVerifier:               poolInput.authVerifier,
-    authorizingAddress:         poolInput.authorizingAddress,
+    authVerifier:                          poolInput.authVerifier,
+    authorizingAddress:                    poolInput.authorizingAddress,
     operationKind,
-    tokenAddress:               poolInput.tokenAddress,
-    recipientAddress:           poolInput.recipientAddress,
-    amount:                     intentAmount,
-    feeRecipientAddress:        poolInput.feeRecipientAddress,
-    feeAmount:                  poolInput.feeAmount,
-    executionConstraintsFlags:  poolInput.executionConstraintsFlags,
-    lockedOutputBinding0:       poolInput.outLockedOutputBinding[0],
-    lockedOutputBinding1:       poolInput.outLockedOutputBinding[1],
-    lockedOutputBinding2:       poolInput.outLockedOutputBinding[2],
-    nonce:                      poolInput.nonce,
-    validUntilSeconds:          poolInput.validUntilSeconds,
-    executionChainId:           poolInput.executionChainId,
-    authSecret:                 "0xA0701337",
-    blindingFactor:             "0xB17ED15ABCDEF0123456789ABCDEF01",
+    tokenAddress:                          poolInput.tokenAddress,
+    recipientOwnerNullifierKeyHash:        poolInput.recipientOwnerNullifierKeyHash,
+    amount:                                intentAmount,
+    feeNoteRecipientOwnerNullifierKeyHash: poolInput.feeNoteRecipientOwnerNullifierKeyHash,
+    feeAmount:                             poolInput.feeAmount,
+    publicRecipientAddress:                poolInput.publicRecipientAddress,
+    executionConstraintsFlags:             poolInput.executionConstraintsFlags,
+    lockedOutputBinding0:                  poolInput.outLockedOutputBinding[0],
+    lockedOutputBinding1:                  poolInput.outLockedOutputBinding[1],
+    lockedOutputBinding2:                  poolInput.outLockedOutputBinding[2],
+    nonce:                                 poolInput.nonce,
+    validUntilSeconds:                     poolInput.validUntilSeconds,
+    executionChainId:                      poolInput.executionChainId,
+    authSecret:                            "0xA0701337",
+    blindingFactor:                        "0xB17ED15ABCDEF0123456789ABCDEF01",
   };
   const sharedIntentPath = path.join(BUILD, "auth_demo", "shared_intent.json");
   fs.mkdirSync(path.dirname(sharedIntentPath), { recursive: true });
@@ -91,22 +92,51 @@ function run(cmd, args, opts = {}) {
     path.join(AUTH_DIR, "witness.wtns"),
   ]);
 
-  // 3. Prove.
-  console.log("==> proving pool");
+  // 3. Prove. Use rapidsnark (native) if RAPIDSNARK_PROVER is set; otherwise
+  //    fall back to snarkjs (WASM). Either path produces the same proof.
+  const PROVER = process.env.RAPIDSNARK_PROVER;
+  const proverLabel = PROVER ? "rapidsnark (native)" : "snarkjs (WASM)";
+  console.log(`==> proving pool [${proverLabel}]`);
   const t0 = Date.now();
-  const { proof: poolProof, publicSignals: poolPublics } = await snarkjs.groth16.prove(
-    path.join(POOL_DIR, "pool_final.zkey"),
-    path.join(POOL_DIR, "witness.wtns"),
-  );
+  let poolProof, poolPublics;
+  if (PROVER) {
+    const proofPath = path.join(POOL_DIR, "proof.json");
+    const publicPath = path.join(POOL_DIR, "public.json");
+    run(PROVER, [
+      path.join(POOL_DIR, "pool_final.zkey"),
+      path.join(POOL_DIR, "witness.wtns"),
+      proofPath, publicPath,
+    ]);
+    poolProof = JSON.parse(fs.readFileSync(proofPath, "utf8"));
+    poolPublics = JSON.parse(fs.readFileSync(publicPath, "utf8"));
+  } else {
+    ({ proof: poolProof, publicSignals: poolPublics } = await snarkjs.groth16.prove(
+      path.join(POOL_DIR, "pool_final.zkey"),
+      path.join(POOL_DIR, "witness.wtns"),
+    ));
+  }
   const t1 = Date.now();
   console.log(`    pool proved in ${(t1 - t0) / 1000}s`);
 
-  console.log("==> proving auth");
+  console.log(`==> proving auth [${proverLabel}]`);
   const t2 = Date.now();
-  const { proof: authProof, publicSignals: authPublics } = await snarkjs.groth16.prove(
-    path.join(AUTH_DIR, "auth_demo_final.zkey"),
-    path.join(AUTH_DIR, "witness.wtns"),
-  );
+  let authProof, authPublics;
+  if (PROVER) {
+    const proofPath = path.join(AUTH_DIR, "proof.json");
+    const publicPath = path.join(AUTH_DIR, "public.json");
+    run(PROVER, [
+      path.join(AUTH_DIR, "auth_demo_final.zkey"),
+      path.join(AUTH_DIR, "witness.wtns"),
+      proofPath, publicPath,
+    ]);
+    authProof = JSON.parse(fs.readFileSync(proofPath, "utf8"));
+    authPublics = JSON.parse(fs.readFileSync(publicPath, "utf8"));
+  } else {
+    ({ proof: authProof, publicSignals: authPublics } = await snarkjs.groth16.prove(
+      path.join(AUTH_DIR, "auth_demo_final.zkey"),
+      path.join(AUTH_DIR, "witness.wtns"),
+    ));
+  }
   const t3 = Date.now();
   console.log(`    auth proved in ${(t3 - t2) / 1000}s`);
 
@@ -140,7 +170,12 @@ function run(cmd, args, opts = {}) {
   console.log("wrote", path.join(OUT, "session.json"));
 
   // Persist prove timings so the bench renderer doesn't have to scrape stdout.
-  const timings = { pool_prove_ms: t1 - t0, auth_prove_ms: t3 - t2 };
+  const timings = {
+    pool_prove_ms: t1 - t0,
+    auth_prove_ms: t3 - t2,
+    prover: PROVER ? "rapidsnark" : "snarkjs",
+    auth_circuit: "groth16_demo",
+  };
   fs.writeFileSync(path.join(OUT, "timings.json"), JSON.stringify(timings, null, 2));
   console.log("wrote", path.join(OUT, "timings.json"));
   process.exit(0);

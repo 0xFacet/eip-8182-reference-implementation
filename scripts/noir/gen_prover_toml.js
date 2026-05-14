@@ -64,33 +64,36 @@ function splitBytes32(bytes32) {
 function defaultIntent(authVerifierAddr, authorizingAddress) {
   // Mirror gen_pool_witness_input.js's worst-case intent so the pool side
   // can be coordinated without surgery on its hardcoded values.
+  const recipientOwnerHash = poseidon(T.OWNER_NULLIFIER_KEY_HASH_DOMAIN, 0xBABE0001n);
+  const feeRecipOwnerHash  = poseidon(T.OWNER_NULLIFIER_KEY_HASH_DOMAIN, 0xBABE0003n);
   return {
-    auth_verifier:               authVerifierAddr,
-    authorizing_address:         authorizingAddress,
-    operation_kind:              0n,                              // TRANSFER_OP per pool gen
-    token_address:               0x2222222222222222222222222222222222222222n,
-    recipient_address:           0x3333333333333333333333333333333333333333n,
-    amount:                      8n,                              // outAmount[0]
-    fee_recipient_address:       0x4444444444444444444444444444444444444444n,
-    fee_amount:                  2n,                              // outAmount[2]
-    execution_constraints_flags: 7n,                              // worst-case (all 3 slots locked)
-    locked_output_binding0:      0n,                              // overwritten with poseidon binding below
-    locked_output_binding1:      0n,
-    locked_output_binding2:      0n,
-    nonce_bytes:                 (() => {
+    auth_verifier:                                authVerifierAddr,
+    authorizing_address:                          authorizingAddress,
+    operation_kind:                               0n,                              // TRANSFER_OP per pool gen
+    token_address:                                0x2222222222222222222222222222222222222222n,
+    recipient_owner_nullifier_key_hash:           recipientOwnerHash,
+    amount:                                       8n,                              // outAmount[0]
+    fee_note_recipient_owner_nullifier_key_hash:  feeRecipOwnerHash,
+    fee_amount:                                   2n,                              // outAmount[2]
+    public_recipient_address:                     0n,                              // transfer mode
+    execution_constraints_flags:                  7n,                              // worst-case (all 3 slots locked)
+    locked_output_binding0:                       0n,                              // overwritten with poseidon binding below
+    locked_output_binding1:                       0n,
+    locked_output_binding2:                       0n,
+    nonce_bytes:                                  (() => {
       // 32-byte nonce; pool gen used 0x9F3A1C7E5B2D4F86 as a Field, but here
       // we need a [u8; 32] nonce that decodes to that field via hi*2^128+lo.
       // The deterministic choice: zero-pad the field on the left to 32 bytes.
       const v = 0x9F3A1C7E5B2D4F86n;
       return bigIntToBytes(v, 32);
     })(),
-    valid_until_seconds:         1735689600n,
-    execution_chain_id:          1n,
+    valid_until_seconds:                          1735689600n,
+    execution_chain_id:                           1n,
   };
 }
 
 function lockedOutputBindings(intent) {
-  // Computed by pool circuit per Section 9.11. For our purposes we just need
+  // Computed by pool circuit per Section 8.10. For our purposes we just need
   // values that match what the pool side computes. We'll re-derive in
   // build_honk_session.js once we have the output note bodies; here, allow
   // the caller to provide them via shared.json. If not provided, use 0 (the
@@ -107,26 +110,27 @@ function eip712Domain(chainId) {
   };
 }
 
-// Per EIP-8182 Section 6.4 normative MUST: companion ERCs MUST authenticate
+// Per EIP-8182 Section 6.1 normative MUST: companion ERCs MUST authenticate
 // blindingFactor via signature, even though it is excluded from
 // transactionIntentDigest. Hence the trailing `blindingFactor` field.
 const TYPES = {
   TransactionIntent: [
-    { name: "authVerifier",                 type: "address" },
-    { name: "authorizingAddress",           type: "address" },
-    { name: "operationKind",                type: "uint256" },
-    { name: "tokenAddress",                 type: "address" },
-    { name: "recipientAddress",             type: "address" },
-    { name: "amount",                       type: "uint256" },
-    { name: "feeRecipientAddress",          type: "address" },
-    { name: "feeAmount",                    type: "uint256" },
-    { name: "executionConstraintsFlags",    type: "uint256" },
-    { name: "lockedOutputBinding0",         type: "bytes32" },
-    { name: "lockedOutputBinding1",         type: "bytes32" },
-    { name: "lockedOutputBinding2",         type: "bytes32" },
-    { name: "nonce",                        type: "bytes32" },
-    { name: "validUntilSeconds",            type: "uint256" },
-    { name: "blindingFactor",               type: "uint256" },
+    { name: "authVerifier",                          type: "address" },
+    { name: "authorizingAddress",                    type: "address" },
+    { name: "operationKind",                         type: "uint256" },
+    { name: "tokenAddress",                          type: "address" },
+    { name: "recipientOwnerNullifierKeyHash",        type: "uint256" },
+    { name: "amount",                                type: "uint256" },
+    { name: "feeNoteRecipientOwnerNullifierKeyHash", type: "uint256" },
+    { name: "feeAmount",                             type: "uint256" },
+    { name: "publicRecipientAddress",                type: "address" },
+    { name: "executionConstraintsFlags",             type: "uint256" },
+    { name: "lockedOutputBinding0",                  type: "bytes32" },
+    { name: "lockedOutputBinding1",                  type: "bytes32" },
+    { name: "lockedOutputBinding2",                  type: "bytes32" },
+    { name: "nonce",                                 type: "bytes32" },
+    { name: "validUntilSeconds",                     type: "uint256" },
+    { name: "blindingFactor",                        type: "uint256" },
   ],
 };
 
@@ -135,21 +139,22 @@ function makeIntentMessage(intent, lockedBindings, blindingFactor) {
   const b32  = (v) => "0x" + v.toString(16).padStart(64, "0");
   const b32FromBytes = (b) => "0x" + Buffer.from(b).toString("hex");
   return {
-    authVerifier:                addr(intent.auth_verifier),
-    authorizingAddress:          addr(intent.authorizing_address),
-    operationKind:               intent.operation_kind,
-    tokenAddress:                addr(intent.token_address),
-    recipientAddress:            addr(intent.recipient_address),
-    amount:                      intent.amount,
-    feeRecipientAddress:         addr(intent.fee_recipient_address),
-    feeAmount:                   intent.fee_amount,
-    executionConstraintsFlags:   intent.execution_constraints_flags,
-    lockedOutputBinding0:        b32(lockedBindings[0]),
-    lockedOutputBinding1:        b32(lockedBindings[1]),
-    lockedOutputBinding2:        b32(lockedBindings[2]),
-    nonce:                       b32FromBytes(intent.nonce_bytes),
-    validUntilSeconds:           intent.valid_until_seconds,
-    blindingFactor:              blindingFactor,
+    authVerifier:                          addr(intent.auth_verifier),
+    authorizingAddress:                    addr(intent.authorizing_address),
+    operationKind:                         intent.operation_kind,
+    tokenAddress:                          addr(intent.token_address),
+    recipientOwnerNullifierKeyHash:        intent.recipient_owner_nullifier_key_hash,
+    amount:                                intent.amount,
+    feeNoteRecipientOwnerNullifierKeyHash: intent.fee_note_recipient_owner_nullifier_key_hash,
+    feeAmount:                             intent.fee_amount,
+    publicRecipientAddress:                addr(intent.public_recipient_address),
+    executionConstraintsFlags:             intent.execution_constraints_flags,
+    lockedOutputBinding0:                  b32(lockedBindings[0]),
+    lockedOutputBinding1:                  b32(lockedBindings[1]),
+    lockedOutputBinding2:                  b32(lockedBindings[2]),
+    nonce:                                 b32FromBytes(intent.nonce_bytes),
+    validUntilSeconds:                     intent.valid_until_seconds,
+    blindingFactor:                        blindingFactor,
   };
 }
 
@@ -202,21 +207,22 @@ async function main() {
     // Coerce all fields to BigInt; nonce_bytes stays an array of small ints.
     const i = shared.intent;
     intent = {
-      auth_verifier:               BigInt(i.auth_verifier),
-      authorizing_address:         BigInt(i.authorizing_address),
-      operation_kind:              BigInt(i.operation_kind),
-      token_address:               BigInt(i.token_address),
-      recipient_address:           BigInt(i.recipient_address),
-      amount:                      BigInt(i.amount),
-      fee_recipient_address:       BigInt(i.fee_recipient_address),
-      fee_amount:                  BigInt(i.fee_amount),
-      execution_constraints_flags: BigInt(i.execution_constraints_flags),
-      locked_output_binding0:      BigInt(i.locked_output_binding0 ?? 0),
-      locked_output_binding1:      BigInt(i.locked_output_binding1 ?? 0),
-      locked_output_binding2:      BigInt(i.locked_output_binding2 ?? 0),
-      nonce_bytes:                 Uint8Array.from(i.nonce_bytes),
-      valid_until_seconds:         BigInt(i.valid_until_seconds),
-      execution_chain_id:          BigInt(i.execution_chain_id),
+      auth_verifier:                                BigInt(i.auth_verifier),
+      authorizing_address:                          BigInt(i.authorizing_address),
+      operation_kind:                               BigInt(i.operation_kind),
+      token_address:                                BigInt(i.token_address),
+      recipient_owner_nullifier_key_hash:           BigInt(i.recipient_owner_nullifier_key_hash),
+      amount:                                       BigInt(i.amount),
+      fee_note_recipient_owner_nullifier_key_hash:  BigInt(i.fee_note_recipient_owner_nullifier_key_hash),
+      fee_amount:                                   BigInt(i.fee_amount),
+      public_recipient_address:                     BigInt(i.public_recipient_address ?? 0),
+      execution_constraints_flags:                  BigInt(i.execution_constraints_flags),
+      locked_output_binding0:                       BigInt(i.locked_output_binding0 ?? 0),
+      locked_output_binding1:                       BigInt(i.locked_output_binding1 ?? 0),
+      locked_output_binding2:                       BigInt(i.locked_output_binding2 ?? 0),
+      nonce_bytes:                                  Uint8Array.from(i.nonce_bytes),
+      valid_until_seconds:                          BigInt(i.valid_until_seconds),
+      execution_chain_id:                           BigInt(i.execution_chain_id),
     };
   } else {
     intent = defaultIntent(authVerifierAddr, authorizingAddress);
@@ -281,10 +287,11 @@ async function main() {
     intent.authorizing_address,
     intent.operation_kind,
     intent.token_address,
-    intent.recipient_address,
+    intent.recipient_owner_nullifier_key_hash,
     intent.amount,
-    intent.fee_recipient_address,
+    intent.fee_note_recipient_owner_nullifier_key_hash,
     intent.fee_amount,
+    intent.public_recipient_address,
     intent.execution_constraints_flags,
     lockedBindings[0],
     lockedBindings[1],
@@ -296,25 +303,26 @@ async function main() {
 
   // -- Prover.toml --
   const lines = [
-    tomlField("auth_verifier",                intent.auth_verifier.toString()),
-    tomlField("authorizing_address",          intent.authorizing_address.toString()),
-    tomlField("operation_kind",               intent.operation_kind.toString()),
-    tomlField("token_address",                intent.token_address.toString()),
-    tomlField("recipient_address",            intent.recipient_address.toString()),
-    tomlField("amount",                       intent.amount.toString()),
-    tomlField("fee_recipient_address",        intent.fee_recipient_address.toString()),
-    tomlField("fee_amount",                   intent.fee_amount.toString()),
-    tomlField("execution_constraints_flags",  intent.execution_constraints_flags.toString()),
-    tomlField("locked_output_binding0",       lockedBindings[0].toString()),
-    tomlField("locked_output_binding1",       lockedBindings[1].toString()),
-    tomlField("locked_output_binding2",       lockedBindings[2].toString()),
-    tomlBytes("nonce",                        intent.nonce_bytes),
-    tomlField("valid_until_seconds",          intent.valid_until_seconds.toString()),
-    tomlField("execution_chain_id",           intent.execution_chain_id.toString()),
-    tomlBytes("pubkey_x",                     pkx),
-    tomlBytes("pubkey_y",                     pky),
-    tomlBytes("signature",                    signature),
-    tomlField("blinding_factor",              blinding_factor.toString()),
+    tomlField("auth_verifier",                                intent.auth_verifier.toString()),
+    tomlField("authorizing_address",                          intent.authorizing_address.toString()),
+    tomlField("operation_kind",                               intent.operation_kind.toString()),
+    tomlField("token_address",                                intent.token_address.toString()),
+    tomlField("recipient_owner_nullifier_key_hash",           intent.recipient_owner_nullifier_key_hash.toString()),
+    tomlField("amount",                                       intent.amount.toString()),
+    tomlField("fee_note_recipient_owner_nullifier_key_hash",  intent.fee_note_recipient_owner_nullifier_key_hash.toString()),
+    tomlField("fee_amount",                                   intent.fee_amount.toString()),
+    tomlField("public_recipient_address",                     intent.public_recipient_address.toString()),
+    tomlField("execution_constraints_flags",                  intent.execution_constraints_flags.toString()),
+    tomlField("locked_output_binding0",                       lockedBindings[0].toString()),
+    tomlField("locked_output_binding1",                       lockedBindings[1].toString()),
+    tomlField("locked_output_binding2",                       lockedBindings[2].toString()),
+    tomlBytes("nonce",                                        intent.nonce_bytes),
+    tomlField("valid_until_seconds",                          intent.valid_until_seconds.toString()),
+    tomlField("execution_chain_id",                           intent.execution_chain_id.toString()),
+    tomlBytes("pubkey_x",                                     pkx),
+    tomlBytes("pubkey_y",                                     pky),
+    tomlBytes("signature",                                    signature),
+    tomlField("blinding_factor",                              blinding_factor.toString()),
   ];
   writeProverToml(lines.join("\n") + "\n");
 
@@ -334,17 +342,18 @@ async function main() {
     nonce_bytes_hex: ethers.hexlify(intent.nonce_bytes),
     locked_output_bindings_dec: lockedBindings.map(b => b.toString()),
     intent_decimal: {
-      auth_verifier:               intent.auth_verifier.toString(),
-      authorizing_address:         intent.authorizing_address.toString(),
-      operation_kind:              intent.operation_kind.toString(),
-      token_address:               intent.token_address.toString(),
-      recipient_address:           intent.recipient_address.toString(),
-      amount:                      intent.amount.toString(),
-      fee_recipient_address:       intent.fee_recipient_address.toString(),
-      fee_amount:                  intent.fee_amount.toString(),
-      execution_constraints_flags: intent.execution_constraints_flags.toString(),
-      valid_until_seconds:         intent.valid_until_seconds.toString(),
-      execution_chain_id:          intent.execution_chain_id.toString(),
+      auth_verifier:                                intent.auth_verifier.toString(),
+      authorizing_address:                          intent.authorizing_address.toString(),
+      operation_kind:                               intent.operation_kind.toString(),
+      token_address:                                intent.token_address.toString(),
+      recipient_owner_nullifier_key_hash:           intent.recipient_owner_nullifier_key_hash.toString(),
+      amount:                                       intent.amount.toString(),
+      fee_note_recipient_owner_nullifier_key_hash:  intent.fee_note_recipient_owner_nullifier_key_hash.toString(),
+      fee_amount:                                   intent.fee_amount.toString(),
+      public_recipient_address:                     intent.public_recipient_address.toString(),
+      execution_constraints_flags:                  intent.execution_constraints_flags.toString(),
+      valid_until_seconds:                          intent.valid_until_seconds.toString(),
+      execution_chain_id:                           intent.execution_chain_id.toString(),
     },
   };
   fs.mkdirSync(path.dirname(SIDECAR), { recursive: true });

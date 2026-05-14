@@ -17,11 +17,9 @@ const PUBLIC_INPUT_FIELDS = [
   "publicRecipientAddress",
   "publicTokenAddress",
   "intentReplayId",
-  "registryRoot",
   "validUntilSeconds",
   "executionChainId",
-  "authPolicyRegistrationRoot",
-  "authPolicyRevocationRoot",
+  "authPolicyRoot",
   "outputNoteDataHash0",
   "outputNoteDataHash1",
   "outputNoteDataHash2",
@@ -37,10 +35,11 @@ function transactionIntentDigest(intent) {
     BigInt(intent.authorizingAddress),
     BigInt(intent.operationKind),
     BigInt(intent.tokenAddress),
-    BigInt(intent.recipientAddress),
+    BigInt(intent.recipientOwnerNullifierKeyHash),
     BigInt(intent.amount),
-    BigInt(intent.feeRecipientAddress),
+    BigInt(intent.feeNoteRecipientOwnerNullifierKeyHash),
     BigInt(intent.feeAmount),
+    BigInt(intent.publicRecipientAddress),
     BigInt(intent.executionConstraintsFlags),
     BigInt(intent.lockedOutputBinding0),
     BigInt(intent.lockedOutputBinding1),
@@ -82,17 +81,14 @@ function nullifier(noteCommitmentValue, ownerNullifierKey) {
   return poseidon(T.NULLIFIER_DOMAIN, BigInt(noteCommitmentValue), BigInt(ownerNullifierKey));
 }
 
-function userRegistryLeaf(user, ownerNullifierKeyHash, noteSecretSeedHash) {
+function authPolicyLeaf(user, ownerNullifierKeyHash, noteSecretSeedHash, policySetCommitment) {
   return poseidon(
-    T.USER_REGISTRY_LEAF_DOMAIN,
+    T.AUTH_POLICY_DOMAIN,
     BigInt(user),
     BigInt(ownerNullifierKeyHash),
     BigInt(noteSecretSeedHash),
+    BigInt(policySetCommitment),
   );
-}
-
-function authPolicyLeaf(user, policyCommitment) {
-  return poseidon(T.AUTH_POLICY_DOMAIN, BigInt(user), BigInt(policyCommitment));
 }
 
 function policyCommitment(authVerifier, authDataCommitment, registrationBlinder) {
@@ -120,7 +116,6 @@ module.exports = {
   noteBodyCommitment,
   noteCommitment,
   nullifier,
-  userRegistryLeaf,
   authPolicyLeaf,
   policyCommitment,
   blindedAuthCommitment,

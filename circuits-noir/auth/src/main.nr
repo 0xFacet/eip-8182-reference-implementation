@@ -1,15 +1,14 @@
 // Realistic EIP-712 / ECDSA-secp256k1 auth circuit for EIP-8182.
 //
-// Public outputs (per Section 9.1):
+// Public outputs (per Section 8.1):
 //   blinded_auth_commitment, transaction_intent_digest
 //
-// Adapted from the recursive-era auth circuit at commit 71e7d72:
-// circuits/inner/eip712/src/main.nr. Key adaptations vs that historical
-// version:
-//   - 15-field intent matching the current Section 9.10 formula.
-//     The first field after the digest domain tag is `auth_verifier`, not
-//     `policy_version`.
-//   - 15-field EIP-712 struct including `blindingFactor` per Section 6.4
+// Adapted from the recursive-era auth circuit at commit 71e7d72. Key
+// adaptations vs that historical version:
+//   - 16-field intent matching the current Section 8.9 formula. Recipient
+//     and fee-recipient are bound as ownerNullifierKeyHash field elements
+//     rather than addresses; publicRecipientAddress is a new field.
+//   - 16-field EIP-712 struct including `blindingFactor` per Section 6.1
 //     normative MUST. (chainId carried by the domain separator; not in struct.)
 //   - 2-field public output `(blinded_auth_commitment, transaction_intent_digest)`
 //     instead of the historical recursive `InnerOutputs`.
@@ -17,7 +16,7 @@
 //     auth_data_commitment, blinding_factor). The historical recursive design
 //     left blinding to the outer wrapper proof; we don't have one.
 //
-// Section 9.1 item 1 binding (`intent.authVerifier == address(this)`).
+// Section 8.1 item 1 binding (`intent.authVerifier == address(this)`).
 //
 // This circuit does NOT directly assert `auth_verifier == address(this)`.
 // The binding to the calling verifier address is enforced by a chain of
@@ -33,7 +32,7 @@
 //     `transactionIntentDigest = poseidon(..., auth_verifier_witness, ...)`.
 //     If the witness disagrees with `V_signed`, the ECDSA check fails.
 //     So the public output's intent digest commits to `V_signed`.
-//  3. The pool circuit's intent-digest formula (Section 9.10) takes
+//  3. The pool circuit's intent-digest formula (Section 8.9) takes
 //     `authVerifier` from the pool proof's public inputs. The system
 //     contract dispatches `IAuthVerifier.verifyAuth` to
 //     `address(uint160(publicInputs.authVerifier))`, so the calling
@@ -47,7 +46,7 @@
 // step 1 is what ties the verifier-address slot in the digest to a value
 // the user actually authorized. Without `authVerifier` in the EIP-712
 // struct, a delegated prover with the same signed credential could route
-// it through a different verifier with different semantics. The 15-field
+// it through a different verifier with different semantics. The 16-field
 // `INTENT_TYPE_HASH` below puts `authVerifier` in slot 0 of the struct;
 // removing it would break the binding.
 //
@@ -119,17 +118,17 @@ pub global VERSION_HASH: [u8; 32] = [
     0xcb, 0x4c, 0x67, 0x2f, 0x29, 0x8b, 0x8b, 0xc6,
 ];
 
-// keccak256("TransactionIntent(address authVerifier,address authorizingAddress,uint256 operationKind,address tokenAddress,address recipientAddress,uint256 amount,address feeRecipientAddress,uint256 feeAmount,uint256 executionConstraintsFlags,bytes32 lockedOutputBinding0,bytes32 lockedOutputBinding1,bytes32 lockedOutputBinding2,bytes32 nonce,uint256 validUntilSeconds,uint256 blindingFactor)")
+// keccak256("TransactionIntent(address authVerifier,address authorizingAddress,uint256 operationKind,address tokenAddress,uint256 recipientOwnerNullifierKeyHash,uint256 amount,uint256 feeNoteRecipientOwnerNullifierKeyHash,uint256 feeAmount,address publicRecipientAddress,uint256 executionConstraintsFlags,bytes32 lockedOutputBinding0,bytes32 lockedOutputBinding1,bytes32 lockedOutputBinding2,bytes32 nonce,uint256 validUntilSeconds,uint256 blindingFactor)")
 //
-// Section 6.4 normative MUST: companion ERCs must authenticate `blindingFactor`
+// Section 6.1 normative MUST: companion ERCs must authenticate `blindingFactor`
 // via signature even though it is excluded from `transactionIntentDigest`.
 // Without it a delegated prover could re-pick `blindingFactor` and re-link
 // transactions for the same authorizing key.
 pub global INTENT_TYPE_HASH: [u8; 32] = [
-    0xa5, 0x14, 0x0f, 0x39, 0xac, 0xcb, 0xbf, 0x0e,
-    0x69, 0xe7, 0xe7, 0x86, 0x8f, 0xaf, 0xc3, 0x04,
-    0xa7, 0xbf, 0x59, 0x33, 0xcb, 0x88, 0x55, 0x44,
-    0x18, 0x76, 0xf4, 0xd3, 0xfe, 0x3e, 0x49, 0x42,
+    0xa1, 0x21, 0x65, 0x19, 0xa9, 0x77, 0x2c, 0xe0,
+    0xda, 0x46, 0x6e, 0xa6, 0x93, 0xfe, 0x69, 0x74,
+    0xc0, 0x38, 0x65, 0x75, 0x44, 0xd6, 0x06, 0x93,
+    0x9a, 0x58, 0x41, 0x7f, 0xcd, 0x35, 0x57, 0x1d,
 ];
 
 global FIELD_MODULUS_BYTES: [u8; 32] = [
@@ -142,15 +141,16 @@ global FIELD_MODULUS_BYTES: [u8; 32] = [
 global U128_SHIFT: Field = 340282366920938463463374607431768211456;
 
 fn main(
-    // 15 intent fields (private; bound by the EIP-712 signature)
+    // 16 intent fields (private; bound by the EIP-712 signature)
     auth_verifier: Field,
     authorizing_address: Field,
     operation_kind: Field,
     token_address: Field,
-    recipient_address: Field,
+    recipient_owner_nullifier_key_hash: Field,
     amount: Field,
-    fee_recipient_address: Field,
+    fee_note_recipient_owner_nullifier_key_hash: Field,
     fee_amount: Field,
+    public_recipient_address: Field,
     execution_constraints_flags: Field,
     locked_output_binding0: Field,
     locked_output_binding1: Field,
@@ -164,15 +164,16 @@ fn main(
     signature: [u8; 64],
     blinding_factor: Field,
 ) -> pub (Field, Field) {
-    // Range checks on bounded semantic types.
+    // Range checks on bounded semantic types. recipient_owner_nullifier_key_hash
+    // and fee_note_recipient_owner_nullifier_key_hash are field elements
+    // (Poseidon outputs), not addresses, so no 160-bit range check applies.
     assert_address(auth_verifier);
     assert_address(authorizing_address);
     assert_valid_operation_kind(operation_kind);
     assert_address(token_address);
-    assert_address(recipient_address);
     assert_amount(amount);
-    assert_address(fee_recipient_address);
     assert_amount(fee_amount);
+    assert_address(public_recipient_address);
     assert_execution_constraints_flags(execution_constraints_flags);
     assert_valid_until(valid_until_seconds);
     assert_lock_constraints(
@@ -197,10 +198,11 @@ fn main(
         authorizing_address,
         operation_kind,
         token_address,
-        recipient_address,
+        recipient_owner_nullifier_key_hash,
         amount,
-        fee_recipient_address,
+        fee_note_recipient_owner_nullifier_key_hash,
         fee_amount,
+        public_recipient_address,
         execution_constraints_flags,
         locked_output_binding0,
         locked_output_binding1,
@@ -227,10 +229,11 @@ fn main(
         authorizing_address,
         operation_kind,
         token_address,
-        recipient_address,
+        recipient_owner_nullifier_key_hash,
         amount,
-        fee_recipient_address,
+        fee_note_recipient_owner_nullifier_key_hash,
         fee_amount,
+        public_recipient_address,
         execution_constraints_flags,
         locked_output_binding0,
         locked_output_binding1,
@@ -283,10 +286,11 @@ fn eip712_signing_hash(
     authorizing_address: Field,
     operation_kind: Field,
     token_address: Field,
-    recipient_address: Field,
+    recipient_owner_nullifier_key_hash: Field,
     amount: Field,
-    fee_recipient_address: Field,
+    fee_note_recipient_owner_nullifier_key_hash: Field,
     fee_amount: Field,
+    public_recipient_address: Field,
     execution_constraints_flags: Field,
     locked_output_binding0: Field,
     locked_output_binding1: Field,
@@ -297,25 +301,26 @@ fn eip712_signing_hash(
     blinding_factor: Field,
 ) -> [u8; 32] {
     // hashStruct(TransactionIntent) = keccak(typeHash || encoded fields).
-    // 15 fields x 32 bytes + 32 bytes typehash = 512 bytes.
-    let mut struct_preimage: [u8; 512] = [0; 512];
+    // 16 fields x 32 bytes + 32 bytes typehash = 544 bytes.
+    let mut struct_preimage: [u8; 544] = [0; 544];
     write_bytes32(INTENT_TYPE_HASH, &mut struct_preimage, 0);
-    write_field_as_u256(auth_verifier,                &mut struct_preimage, 32);
-    write_field_as_u256(authorizing_address,          &mut struct_preimage, 64);
-    write_field_as_u256(operation_kind,               &mut struct_preimage, 96);
-    write_field_as_u256(token_address,                &mut struct_preimage, 128);
-    write_field_as_u256(recipient_address,            &mut struct_preimage, 160);
-    write_field_as_u256(amount,                       &mut struct_preimage, 192);
-    write_field_as_u256(fee_recipient_address,        &mut struct_preimage, 224);
-    write_field_as_u256(fee_amount,                   &mut struct_preimage, 256);
-    write_field_as_u256(execution_constraints_flags,  &mut struct_preimage, 288);
-    write_field_as_u256(locked_output_binding0,       &mut struct_preimage, 320);
-    write_field_as_u256(locked_output_binding1,       &mut struct_preimage, 352);
-    write_field_as_u256(locked_output_binding2,       &mut struct_preimage, 384);
-    write_bytes32(nonce,                              &mut struct_preimage, 416);
-    write_field_as_u256(valid_until_seconds,          &mut struct_preimage, 448);
-    write_field_as_u256(blinding_factor,              &mut struct_preimage, 480);
-    let struct_hash = keccak256(struct_preimage, 512);
+    write_field_as_u256(auth_verifier,                                 &mut struct_preimage, 32);
+    write_field_as_u256(authorizing_address,                           &mut struct_preimage, 64);
+    write_field_as_u256(operation_kind,                                &mut struct_preimage, 96);
+    write_field_as_u256(token_address,                                 &mut struct_preimage, 128);
+    write_field_as_u256(recipient_owner_nullifier_key_hash,            &mut struct_preimage, 160);
+    write_field_as_u256(amount,                                        &mut struct_preimage, 192);
+    write_field_as_u256(fee_note_recipient_owner_nullifier_key_hash,   &mut struct_preimage, 224);
+    write_field_as_u256(fee_amount,                                    &mut struct_preimage, 256);
+    write_field_as_u256(public_recipient_address,                      &mut struct_preimage, 288);
+    write_field_as_u256(execution_constraints_flags,                   &mut struct_preimage, 320);
+    write_field_as_u256(locked_output_binding0,                        &mut struct_preimage, 352);
+    write_field_as_u256(locked_output_binding1,                        &mut struct_preimage, 384);
+    write_field_as_u256(locked_output_binding2,                        &mut struct_preimage, 416);
+    write_bytes32(nonce,                                               &mut struct_preimage, 448);
+    write_field_as_u256(valid_until_seconds,                           &mut struct_preimage, 480);
+    write_field_as_u256(blinding_factor,                               &mut struct_preimage, 512);
+    let struct_hash = keccak256(struct_preimage, 544);
 
     // domainSeparator = keccak(typeHash || nameHash || versionHash || chainId || verifyingContract).
     let mut domain_preimage: [u8; 160] = [0; 160];

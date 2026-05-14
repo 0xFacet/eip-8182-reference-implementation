@@ -28,7 +28,6 @@ const CONTEXTS = [
   ['AUTH_POLICY_DOMAIN',              'auth_policy'],
   ['POLICY_COMMITMENT_DOMAIN',        'policy_commitment'],
   ['BLINDED_AUTH_COMMITMENT_DOMAIN',  'blinded_auth_commitment'],
-  ['USER_REGISTRY_LEAF_DOMAIN',       'user_registry_leaf'],
 ];
 
 const tags = {};

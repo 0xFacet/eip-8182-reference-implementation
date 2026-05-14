@@ -11,8 +11,8 @@
 // which witness is fed in. Worst-case witness has all inputs real, all outputs
 // real, fee used, all slots locked.
 //
-// Public inputs: 21 fields per spec Section 10, in declaration order.
-// Section 9.1-9.11 constraints all wired in.
+// Public inputs: 19 fields per spec Section 9, in declaration order.
+// Section 8.1-8.10 constraints all wired in.
 
 pragma circom 2.0.0;
 
@@ -21,8 +21,11 @@ include "components.circom";
 include "merkle.circom";
 include "bits.circom";
 
+// Spec Section 3.2: per-user policy-set tree depth.
+function POLICY_SET_DEPTH() { return 8; }
+
 template Pool() {
-    // ===== Public inputs (21 fields, Section 10 declaration order) =====
+    // ===== Public inputs (19 fields, Section 9 declaration order) =====
     signal input noteCommitmentRoot;
     signal input nullifier0;
     signal input nullifier1;
@@ -33,11 +36,9 @@ template Pool() {
     signal input publicRecipientAddress;
     signal input publicTokenAddress;
     signal input intentReplayId;
-    signal input registryRoot;
     signal input validUntilSeconds;
     signal input executionChainId;
-    signal input authPolicyRegistrationRoot;
-    signal input authPolicyRevocationRoot;
+    signal input authPolicyRoot;
     signal input outputNoteDataHash0;
     signal input outputNoteDataHash1;
     signal input outputNoteDataHash2;
@@ -46,11 +47,14 @@ template Pool() {
     signal input transactionIntentDigest;
 
     // ===== Private witnesses =====
-    // Sender identity & registration
+    // Sender identity & auth-policy registry leaf state
     signal input senderOwnerNullifierKey;
     signal input senderNoteSecretSeed;
-    signal input authorizingAddress;                   // <2^160; equals senderUser
-    signal input senderUserSiblings[160];              // path bits derived from authorizingAddress
+    signal input authorizingAddress;                   // <2^160
+    signal input noteSecretSeedHash;                   // = poseidon(NOTE_SECRET_SEED_DOMAIN, senderNoteSecretSeed)
+    signal input policySetCommitment;                  // depth-POLICY_SET_DEPTH root over the user's active policyCommitments
+    signal input leafPosition;                         // <2^32; user's slot in the auth-policy registry
+    signal input authPolicySiblings[32];
 
     // Inputs: 2 slots, each real (1) or phantom (0)
     signal input inIsReal[2];                          // bool
@@ -63,29 +67,24 @@ template Pool() {
     signal input outIsReal[3];                         // bool
     signal input outAmount[3];                         // <2^248
     signal input outOwnerNullifierKeyHash[3];          // recipient's hash for real, DUMMY_OWNER_HASH for dummy
-    signal input outRecipient[3];                      // <2^160
-    signal input outRecipientNoteSecretSeedHash[3];
-    signal input outRecipientSiblings[3][160];         // path bits derived from outRecipient
     signal input outLockedOutputBinding[3];            // signed lock value (paired with flag bit i)
 
     // Canonical token (single witness shared by all real inputs/outputs)
     signal input tokenAddress;                         // <2^160
 
-    // Intent fields (private signed)
-    signal input recipientAddress;                     // signed; <2^160
-    signal input feeRecipientAddress;                  // signed; <2^160
-    signal input feeNoteRecipientAddress;              // <2^160; actual slot-2 recipient
+    // Intent fields (private, authorization-bound)
+    signal input recipientOwnerNullifierKeyHash;       // recipient's ownerNullifierKeyHash in transfer mode; 0 in withdrawal
+    signal input feeNoteRecipientOwnerNullifierKeyHash;// fee-recipient's ownerNullifierKeyHash when feeAmount > 0; 0 otherwise
     signal input feeAmount;                            // <2^248
     signal input nonce;
     signal input executionConstraintsFlags;            // <2^32, only bits 0/1/2 may be set
 
-    // Auth-policy registration + revocation
+    // Auth-policy proof witnesses
     signal input authDataCommitment;
     signal input blindingFactor;
     signal input registrationBlinder;
-    signal input leafPosition;                         // <2^32
-    signal input authRegSiblings[32];
-    signal input authRevSiblings[32];
+    signal input policySetLeafPosition;                // <2^POLICY_SET_DEPTH; slot of policyCommitment in policy-set tree
+    signal input policySetSiblings[8];                 // POLICY_SET_DEPTH
 
     // ===== Range / boolean checks =====
     component nbAuthVerifier   = Num2Bits(160); nbAuthVerifier.in   <== authVerifier;
@@ -95,16 +94,14 @@ template Pool() {
     component nbValidUntil     = Num2Bits(32);  nbValidUntil.in     <== validUntilSeconds;
     component nbExecChain      = Num2Bits(32);  nbExecChain.in      <== executionChainId;
 
-    component nbRecipient      = Num2Bits(160); nbRecipient.in      <== recipientAddress;
-    component nbFeeRecipient   = Num2Bits(160); nbFeeRecipient.in   <== feeRecipientAddress;
-    component nbFeeNoteRecip   = Num2Bits(160); nbFeeNoteRecip.in   <== feeNoteRecipientAddress;
     component nbAuthAddr       = Num2Bits(160); nbAuthAddr.in       <== authorizingAddress;
     component nbToken          = Num2Bits(160); nbToken.in          <== tokenAddress;
     component nbFeeAmount      = Num2Bits(248); nbFeeAmount.in      <== feeAmount;
     component nbExecFlags      = Num2Bits(32);  nbExecFlags.in      <== executionConstraintsFlags;
     component nbLeafPos        = Num2Bits(32);  nbLeafPos.in        <== leafPosition;
+    component nbPolicySetLeafPos = Num2Bits(8); nbPolicySetLeafPos.in <== policySetLeafPosition;
 
-    // Reserved-flag-bit rejection (spec Section 9.11): only bits 0/1/2 are
+    // Reserved-flag-bit rejection (spec Section 8.10): only bits 0/1/2 are
     // defined (LOCK_OUTPUT_BINDING_0/1/2). Every other bit MUST be zero.
     for (var i = 3; i < 32; i++) {
         nbExecFlags.out[i] === 0;
@@ -114,7 +111,7 @@ template Pool() {
     for (var i = 0; i < 2; i++) inIsReal[i] * (1 - inIsReal[i]) === 0;
     for (var i = 0; i < 3; i++) outIsReal[i] * (1 - outIsReal[i]) === 0;
 
-    // At-least-one-real-input (spec Sections 8.2, 8.3, 9.2)
+    // At-least-one-real-input (spec Section 8.2)
     (1 - inIsReal[0]) * (1 - inIsReal[1]) === 0;
 
     // Per-input range/decomposition. nbInLeaf.out doubles as the merkle-path bits.
@@ -125,63 +122,86 @@ template Pool() {
         nbInLeaf[i] = Num2Bits(32);  nbInLeaf[i].in <== inLeafIndex[i];
     }
 
-    // Phantom inputs MUST have amount == 0 (spec Section 9.2)
+    // Phantom inputs MUST have amount == 0 (spec Section 8.2)
     for (var i = 0; i < 2; i++) {
         (1 - inIsReal[i]) * inAmount[i] === 0;
     }
 
-    // Per-output range. nbOutRecip.out doubles as the recipient registry path bits.
+    // Per-output amount range.
     component nbOutAmt[3];
-    component nbOutRecip[3];
     for (var i = 0; i < 3; i++) {
-        nbOutAmt[i]   = Num2Bits(248); nbOutAmt[i].in   <== outAmount[i];
-        nbOutRecip[i] = Num2Bits(160); nbOutRecip[i].in <== outRecipient[i];
+        nbOutAmt[i] = Num2Bits(248); nbOutAmt[i].in <== outAmount[i];
     }
 
-    // ===== operationKind derivation (spec Section 9.10) =====
+    // ===== operationKind derivation (spec Section 8.9) =====
     // operationKind = 0 (TRANSFER_OP) iff publicAmountOut == 0
-    //                1 (WITHDRAWAL_OP) iff publicAmountOut > 0
+    //                 1 (WITHDRAWAL_OP) iff publicAmountOut > 0
     component pubAmtIsZero = IsZero();
     pubAmtIsZero.in <== publicAmountOut;
     signal operationKind;
     operationKind <== 1 - pubAmtIsZero.out;
 
-    // Public-mode bindings (spec Section 9.10):
+    // Public-mode bindings (spec Section 8.9):
     //   transfer    : publicRecipientAddress == 0 AND publicTokenAddress == 0
-    //   withdrawal  : publicRecipientAddress == recipientAddress (signed)
-    //                 publicTokenAddress     == tokenAddress (signed)
+    //   withdrawal  : publicTokenAddress == tokenAddress (signed canonical)
     (1 - operationKind) * publicRecipientAddress === 0;
     (1 - operationKind) * publicTokenAddress === 0;
     operationKind * (publicTokenAddress - tokenAddress) === 0;
-    operationKind * (publicRecipientAddress - recipientAddress) === 0;
+    // publicRecipientAddress in withdrawal is bound directly into the intent
+    // digest below; no separate intent-side recipientAddress witness exists.
 
     // ===== Sender identity =====
+    // poseidon(OWNER_NULLIFIER_KEY_HASH_DOMAIN, senderOwnerNullifierKey)
     component senderHashKey = OwnerNullifierKeyHash();
     senderHashKey.ownerNullifierKey <== senderOwnerNullifierKey;
     signal senderOwnerNullifierKeyHash;
     senderOwnerNullifierKeyHash <== senderHashKey.out;
 
+    // poseidon(NOTE_SECRET_SEED_DOMAIN, senderNoteSecretSeed) MUST equal the
+    // noteSecretSeedHash field extracted from the auth-policy registry leaf.
     component senderSeedHash = NoteSecretSeedHash();
     senderSeedHash.noteSecretSeed <== senderNoteSecretSeed;
-    signal senderNoteSecretSeedHash;
-    senderNoteSecretSeedHash <== senderSeedHash.out;
+    senderSeedHash.out === noteSecretSeedHash;
 
-    // Sender user-registry leaf
-    component senderRegLeaf = UserRegistryLeaf();
-    senderRegLeaf.user                  <== authorizingAddress;
-    senderRegLeaf.ownerNullifierKeyHash <== senderOwnerNullifierKeyHash;
-    senderRegLeaf.noteSecretSeedHash    <== senderNoteSecretSeedHash;
+    // ===== Auth-policy registry leaf membership (spec Section 8.1) =====
+    component aplLeaf = AuthPolicyLeaf();
+    aplLeaf.user                  <== authorizingAddress;
+    aplLeaf.ownerNullifierKeyHash <== senderOwnerNullifierKeyHash;
+    aplLeaf.noteSecretSeedHash    <== noteSecretSeedHash;
+    aplLeaf.policySetCommitment   <== policySetCommitment;
 
-    // Sender user-registry path -> registryRoot. Path bits derived from
-    // authorizingAddress's bit decomposition; this binds membership to *this*
-    // address rather than to "some path that lands at this leaf" (spec 9.6).
-    component senderRegPath = MerklePath(160);
-    senderRegPath.leaf <== senderRegLeaf.out;
-    for (var b = 0; b < 160; b++) {
-        senderRegPath.pathBits[b] <== nbAuthAddr.out[b];
-        senderRegPath.siblings[b] <== senderUserSiblings[b];
+    component aplPath = MerklePath(32);
+    aplPath.leaf <== aplLeaf.out;
+    for (var b = 0; b < 32; b++) {
+        aplPath.pathBits[b] <== nbLeafPos.out[b];
+        aplPath.siblings[b] <== authPolicySiblings[b];
     }
-    senderRegPath.root === registryRoot;
+    aplPath.root === authPolicyRoot;
+
+    // ===== Policy-set membership (spec Section 8.1) =====
+    // policyCommitment = poseidon(POLICY_COMMITMENT_DOMAIN, authVerifier,
+    //                             authDataCommitment, registrationBlinder)
+    component pc = PolicyCommitment();
+    pc.authVerifier        <== authVerifier;
+    pc.authDataCommitment  <== authDataCommitment;
+    pc.registrationBlinder <== registrationBlinder;
+    signal policyCommitment;
+    policyCommitment <== pc.out;
+
+    // policyCommitment != 0 (the empty-policy-set sentinel). Forces no spend
+    // can succeed against a wallet that has revoked all policies (empty-set
+    // root has only 0 leaves and the path for a nonzero leaf cannot match).
+    component policyCommitmentIsZero = IsZero();
+    policyCommitmentIsZero.in <== policyCommitment;
+    policyCommitmentIsZero.out === 0;
+
+    component policySetPath = MerklePath(8);
+    policySetPath.leaf <== policyCommitment;
+    for (var b = 0; b < 8; b++) {
+        policySetPath.pathBits[b] <== nbPolicySetLeafPos.out[b];
+        policySetPath.siblings[b] <== policySetSiblings[b];
+    }
+    policySetPath.root === policySetCommitment;
 
     // ===== Inputs: per-slot derivation =====
     // For each input, derive owner / body / final commitment / nullifier, check
@@ -240,15 +260,16 @@ template Pool() {
     inEffectiveNullifier[1] === nullifier1;
 
     // ===== DUMMY_OWNER_NULLIFIER_KEY_HASH (spec Section 3.2) =====
-    // poseidon(OWNER_NULLIFIER_KEY_HASH_DOMAIN, 0xdead). Reserved value that
-    // registerUser rejects, making dummy-shaped notes structurally unspendable.
+    // poseidon(OWNER_NULLIFIER_KEY_HASH_DOMAIN, 0xdead). setAuthPolicy rejects
+    // this value, so notes whose owner-hash is DUMMY are structurally
+    // unspendable.
     component dummyOwnerHashCalc = OwnerNullifierKeyHash();
     dummyOwnerHashCalc.ownerNullifierKey <== 57005;            // 0xdead
     signal DUMMY_OWNER_HASH;
     DUMMY_OWNER_HASH <== dummyOwnerHashCalc.out;
 
     // ===== Outputs: per-slot derivation =====
-    // Per spec Section 9.5, every output slot deterministically derives noteSecret,
+    // Per spec Section 8.5, every output slot deterministically derives noteSecret,
     // computes ownerCommitment, noteBodyCommitment, and binds noteBodyCommitment
     // to the public input.
     component outNoteSecret[3];
@@ -269,7 +290,7 @@ template Pool() {
         outOC[i].noteSecret            <== outNoteSecret[i].out;
 
         // Real output  -> body uses canonical tokenAddress
-        // Dummy output -> body uses 0 (spec Section 9.5 dummy)
+        // Dummy output -> body uses 0 (spec Section 8.5 dummy)
         outBodyToken[i] <== outIsReal[i] * tokenAddress;
 
         outBC[i] = NoteBodyCommitment();
@@ -280,11 +301,11 @@ template Pool() {
         outBind[i] = OutputBinding();
         outBind[i].noteBodyCommitment <== outBC[i].out;
 
-        // Dummy output -> amount == 0 (spec Section 9.5)
+        // Dummy output -> amount == 0 (spec Section 8.5)
         (1 - outIsReal[i]) * outAmount[i] === 0;
         // Dummy output -> ownerNullifierKeyHash == DUMMY_OWNER_NULLIFIER_KEY_HASH
         (1 - outIsReal[i]) * (outOwnerNullifierKeyHash[i] - DUMMY_OWNER_HASH) === 0;
-        // Real output -> amount > 0 (spec Section 9.5)
+        // Real output -> amount > 0 (spec Section 8.5)
         outAmtIsZero[i] = IsZero();
         outAmtIsZero[i].in <== outAmount[i];
         outIsReal[i] * outAmtIsZero[i].out === 0;
@@ -293,7 +314,7 @@ template Pool() {
     outBind[1].outputNoteDataHash <== outputNoteDataHash1;
     outBind[2].outputNoteDataHash <== outputNoteDataHash2;
 
-    // ===== Output-binding lock (spec Section 9.11) =====
+    // ===== Output-binding lock (spec Section 8.10) =====
     // Strict pairing: flag bit set => locked == binding; flag bit unset => locked == 0.
     signal lockFlagBit[3];
     for (var i = 0; i < 3; i++) {
@@ -307,76 +328,59 @@ template Pool() {
     outBC[1].out === noteBodyCommitment1;
     outBC[2].out === noteBodyCommitment2;
 
-    // ===== Recipient registry membership (one per real output) =====
-    // Path bits derived from outRecipient bits (binding membership to *this*
-    // recipient address). Selectively enforced for real outputs.
-    component outRegLeaf[3];
-    component outRegPath[3];
-    for (var i = 0; i < 3; i++) {
-        outRegLeaf[i] = UserRegistryLeaf();
-        outRegLeaf[i].user                  <== outRecipient[i];
-        outRegLeaf[i].ownerNullifierKeyHash <== outOwnerNullifierKeyHash[i];
-        outRegLeaf[i].noteSecretSeedHash    <== outRecipientNoteSecretSeedHash[i];
-
-        outRegPath[i] = MerklePath(160);
-        outRegPath[i].leaf <== outRegLeaf[i].out;
-        for (var b = 0; b < 160; b++) {
-            outRegPath[i].pathBits[b] <== nbOutRecip[i].out[b];
-            outRegPath[i].siblings[b] <== outRecipientSiblings[i][b];
-        }
-        outIsReal[i] * (outRegPath[i].root - registryRoot) === 0;
-    }
-
-    // ===== Per-mode output assignments (spec Section 9.5) =====
+    // ===== Per-mode output assignments (spec Section 8.5) =====
     // Transfer (operationKind == 0):
-    //   slot 0 MUST be real and owned by recipientAddress
-    //   slot 1 if real, owned by sender (authorizingAddress)
+    //   slot 0 MUST be real, owned by recipientOwnerNullifierKeyHash, which
+    //     MUST NOT be 0 or DUMMY_OWNER_HASH.
+    //   slot 1 if real, owned by sender (senderOwnerNullifierKeyHash).
     (1 - operationKind) * (1 - outIsReal[0]) === 0;
-    (1 - operationKind) * (outRecipient[0] - recipientAddress) === 0;
+    (1 - operationKind) * (outOwnerNullifierKeyHash[0] - recipientOwnerNullifierKeyHash) === 0;
+
+    component recipOwnerIsZero  = IsZero();
+    recipOwnerIsZero.in  <== recipientOwnerNullifierKeyHash;
+    component recipOwnerIsDummy = IsZero();
+    recipOwnerIsDummy.in <== recipientOwnerNullifierKeyHash - DUMMY_OWNER_HASH;
+    (1 - operationKind) * recipOwnerIsZero.out  === 0;
+    (1 - operationKind) * recipOwnerIsDummy.out === 0;
 
     signal sel_xfer_real1;
     sel_xfer_real1 <== (1 - operationKind) * outIsReal[1];
-    sel_xfer_real1 * (outRecipient[1] - authorizingAddress) === 0;
+    sel_xfer_real1 * (outOwnerNullifierKeyHash[1] - senderOwnerNullifierKeyHash) === 0;
 
     // Withdrawal (operationKind == 1):
-    //   slot 0 if real, owned by sender (authorizingAddress)
-    //   slot 1 MUST be dummy
+    //   slot 0 if real, owned by sender (senderOwnerNullifierKeyHash).
+    //   slot 1 MUST be dummy.
+    //   recipientOwnerNullifierKeyHash MUST be 0 (transfer-only field).
     operationKind * outIsReal[1] === 0;
+    operationKind * recipientOwnerNullifierKeyHash === 0;
 
     signal sel_with_real0;
     sel_with_real0 <== operationKind * outIsReal[0];
-    sel_with_real0 * (outRecipient[0] - authorizingAddress) === 0;
+    sel_with_real0 * (outOwnerNullifierKeyHash[0] - senderOwnerNullifierKeyHash) === 0;
 
-    // ===== Fee-slot rules (spec Section 9.5) =====
+    // ===== Fee-slot rules (spec Section 8.5) =====
     component feeAmtIsZero = IsZero();
     feeAmtIsZero.in <== feeAmount;
-    component feeRecipIsZero = IsZero();
-    feeRecipIsZero.in <== feeRecipientAddress;
 
-    // dummy slot 2 ⇔ feeAmount == 0
+    // dummy slot 2 <=> feeAmount == 0
     (1 - outIsReal[2]) * feeAmount === 0;
     feeAmtIsZero.out * outIsReal[2] === 0;
 
-    // real slot 2 -> outAmount[2] == feeAmount AND outRecipient[2] == feeNoteRecipientAddress
+    // real slot 2 -> outAmount[2] == feeAmount AND
+    //                outOwnerNullifierKeyHash[2] == feeNoteRecipientOwnerNullifierKeyHash
     outIsReal[2] * (outAmount[2] - feeAmount) === 0;
-    outIsReal[2] * (outRecipient[2] - feeNoteRecipientAddress) === 0;
+    outIsReal[2] * (outOwnerNullifierKeyHash[2] - feeNoteRecipientOwnerNullifierKeyHash) === 0;
 
-    // feeRecipientAddress != 0 ⇒ feeNoteRecipientAddress == feeRecipientAddress
-    signal feeRecipientNonZero;
-    feeRecipientNonZero <== 1 - feeRecipIsZero.out;
-    feeRecipientNonZero * (feeNoteRecipientAddress - feeRecipientAddress) === 0;
+    // feeAmount == 0 ⇒ feeNoteRecipientOwnerNullifierKeyHash == 0
+    feeAmtIsZero.out * feeNoteRecipientOwnerNullifierKeyHash === 0;
 
-    // feeAmount == 0 ⇒ feeNoteRecipientAddress == 0
-    feeAmtIsZero.out * feeNoteRecipientAddress === 0;
-
-    // real slot 2 ⇒ feeNoteRecipientAddress != 0 (spec Section 9.5).
-    // The recipient-registry membership check already blocks address 0
-    // (registerUser is msg.sender-keyed and the EVM origin can't be 0x0),
-    // but enforcing this directly satisfies the spec MUST without relying
-    // on the contract-layer registry semantics.
-    component feeNoteRecipIsZero = IsZero();
-    feeNoteRecipIsZero.in <== feeNoteRecipientAddress;
-    outIsReal[2] * feeNoteRecipIsZero.out === 0;
+    // real slot 2 ⇒ feeNoteRecipientOwnerNullifierKeyHash != 0 and != DUMMY
+    component feeRecipOwnerIsZero  = IsZero();
+    feeRecipOwnerIsZero.in  <== feeNoteRecipientOwnerNullifierKeyHash;
+    component feeRecipOwnerIsDummy = IsZero();
+    feeRecipOwnerIsDummy.in <== feeNoteRecipientOwnerNullifierKeyHash - DUMMY_OWNER_HASH;
+    outIsReal[2] * feeRecipOwnerIsZero.out  === 0;
+    outIsReal[2] * feeRecipOwnerIsDummy.out === 0;
 
     // ===== Value conservation =====
     // sum(real input amounts) == sum(real output amounts) + publicAmountOut
@@ -394,33 +398,6 @@ template Pool() {
     irc.executionChainId   <== executionChainId;
     irc.nonce              <== nonce;
     irc.out === intentReplayId;
-
-    // ===== Auth-policy registration tree membership =====
-    component pc = PolicyCommitment();
-    pc.authVerifier        <== authVerifier;
-    pc.authDataCommitment  <== authDataCommitment;
-    pc.registrationBlinder <== registrationBlinder;
-
-    component apl = AuthPolicyLeaf();
-    apl.user             <== authorizingAddress;
-    apl.policyCommitment <== pc.out;
-
-    component authRegPath = MerklePath(32);
-    authRegPath.leaf <== apl.out;
-    for (var b = 0; b < 32; b++) {
-        authRegPath.pathBits[b] <== nbLeafPos.out[b];
-        authRegPath.siblings[b] <== authRegSiblings[b];
-    }
-    authRegPath.root === authPolicyRegistrationRoot;
-
-    // ===== Auth-policy revocation tree non-membership (leaf at leafPosition == 0) =====
-    component authRevPath = MerklePath(32);
-    authRevPath.leaf <== 0;
-    for (var b = 0; b < 32; b++) {
-        authRevPath.pathBits[b] <== nbLeafPos.out[b];
-        authRevPath.siblings[b] <== authRevSiblings[b];
-    }
-    authRevPath.root === authPolicyRevocationRoot;
 
     // ===== Blinded auth commitment =====
     component bac = BlindedAuthCommitment();
@@ -440,21 +417,22 @@ template Pool() {
     intentAmount <== intentAmountTransfer + intentAmountWithdrawal;
 
     component tid = TransactionIntentDigest();
-    tid.authVerifier               <== authVerifier;
-    tid.authorizingAddress         <== authorizingAddress;
-    tid.operationKind              <== operationKind;
-    tid.tokenAddress               <== tokenAddress;
-    tid.recipientAddress           <== recipientAddress;
-    tid.amount                     <== intentAmount;
-    tid.feeRecipientAddress        <== feeRecipientAddress;
-    tid.feeAmount                  <== feeAmount;
-    tid.executionConstraintsFlags  <== executionConstraintsFlags;
-    tid.lockedOutputBinding0       <== outLockedOutputBinding[0];
-    tid.lockedOutputBinding1       <== outLockedOutputBinding[1];
-    tid.lockedOutputBinding2       <== outLockedOutputBinding[2];
-    tid.nonce                      <== nonce;
-    tid.validUntilSeconds          <== validUntilSeconds;
-    tid.executionChainId           <== executionChainId;
+    tid.authVerifier                          <== authVerifier;
+    tid.authorizingAddress                    <== authorizingAddress;
+    tid.operationKind                         <== operationKind;
+    tid.tokenAddress                          <== tokenAddress;
+    tid.recipientOwnerNullifierKeyHash        <== recipientOwnerNullifierKeyHash;
+    tid.amount                                <== intentAmount;
+    tid.feeNoteRecipientOwnerNullifierKeyHash <== feeNoteRecipientOwnerNullifierKeyHash;
+    tid.feeAmount                             <== feeAmount;
+    tid.publicRecipientAddress                <== publicRecipientAddress;
+    tid.executionConstraintsFlags             <== executionConstraintsFlags;
+    tid.lockedOutputBinding0                  <== outLockedOutputBinding[0];
+    tid.lockedOutputBinding1                  <== outLockedOutputBinding[1];
+    tid.lockedOutputBinding2                  <== outLockedOutputBinding[2];
+    tid.nonce                                 <== nonce;
+    tid.validUntilSeconds                     <== validUntilSeconds;
+    tid.executionChainId                      <== executionChainId;
     tid.out === transactionIntentDigest;
 }
 
@@ -464,9 +442,8 @@ component main { public [
     noteBodyCommitment0, noteBodyCommitment1, noteBodyCommitment2,
     publicAmountOut, publicRecipientAddress, publicTokenAddress,
     intentReplayId,
-    registryRoot,
     validUntilSeconds, executionChainId,
-    authPolicyRegistrationRoot, authPolicyRevocationRoot,
+    authPolicyRoot,
     outputNoteDataHash0, outputNoteDataHash1, outputNoteDataHash2,
     authVerifier,
     blindedAuthCommitment, transactionIntentDigest
