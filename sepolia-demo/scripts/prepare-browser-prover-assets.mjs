@@ -10,19 +10,19 @@ const publicProverDir = path.join(demoRoot, "app", "public", "prover");
 
 const assets = [
   {
-    sources: ["build/pool/pool_js/pool.wasm", "demo/assets/pool.wasm"],
+    sources: ["build/pool/pool_js/pool.wasm", "prover-assets/pool.wasm", "demo/assets/pool.wasm"],
     targetName: "pool.wasm",
   },
   {
-    sources: ["build/pool/pool_final.zkey", "demo/assets/pool_final.zkey"],
+    sources: ["build/pool/pool_final.zkey", "prover-assets/pool_final.zkey", "demo/assets/pool_final.zkey"],
     targetName: "pool_final.zkey",
   },
   {
-    sources: ["build/pool/pool_vkey.json", "demo/assets/pool_vkey.json"],
+    sources: ["build/pool/pool_vkey.json", "prover-assets/pool_vkey.json", "demo/assets/pool_vkey.json"],
     targetName: "pool_vkey.json",
   },
   {
-    sources: ["circuits-noir/auth/target/auth.json", "demo/assets/auth.json"],
+    sources: ["circuits-noir/auth/target/auth.json", "prover-assets/auth.json", "demo/assets/auth.json"],
     targetName: "auth.json",
   },
 ];
@@ -40,14 +40,17 @@ async function findReadableSource(sourceRelatives) {
   const attempted = [];
   let lastCause;
   for (const sourceRelative of sourceRelatives) {
-    const source = path.join(repoRoot, sourceRelative);
-    attempted.push(sourceRelative);
-    try {
-      await stat(source);
-      return { source, sourceRelative };
-    } catch (cause) {
-      lastCause = cause;
+    for (const root of [repoRoot, demoRoot]) {
+      const source = path.join(root, sourceRelative);
+      const label = path.relative(demoRoot, source);
+      attempted.push(label);
+      try {
+        await stat(source);
+        return { source, sourceRelative: label };
+      } catch (cause) {
+        lastCause = cause;
+      }
     }
   }
-  throw new Error(`missing prover asset; checked ${attempted.join(", ")}; run the circuit builds first or commit demo/assets`, { cause: lastCause });
+  throw new Error(`missing prover asset; checked ${attempted.join(", ")}; run the circuit builds first or commit sepolia-demo/prover-assets`, { cause: lastCause });
 }
