@@ -52,7 +52,7 @@ import {
 } from '../../src/index.js';
 import { addressesConfigured, authVerifierConfigured, demoAddresses, deploymentBlock, SEPOLIA_CHAIN_ID } from './demoConfig';
 import { proveTransferInBrowser, type BrowserProverResponse } from './proverClient';
-import { wagmiConfig } from './wagmi';
+import { rainbowWagmiConfig } from './wagmi';
 import './styles.css';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const;
@@ -1157,7 +1157,7 @@ function revivePublicInputs(input: BrowserProverResponse['publicInputs']): DemoP
 const queryClient = new QueryClient();
 
 createRoot(document.getElementById('root')!).render(
-  <WagmiProvider config={wagmiConfig}>
+  <WagmiProvider config={rainbowWagmiConfig}>
     <QueryClientProvider client={queryClient}>
       <RainbowKitProvider
         theme={lightTheme({

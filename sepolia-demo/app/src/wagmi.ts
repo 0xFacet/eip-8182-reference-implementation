@@ -1,14 +1,22 @@
-import { createConfig, http } from 'wagmi';
+import { getDefaultConfig } from '@rainbow-me/rainbowkit';
+import { http } from 'wagmi';
 import { sepolia } from 'wagmi/chains';
-import { injected } from 'wagmi/connectors';
 
-// Match the AztecBirds pattern: only use injected EIP-1193 wallets, so the
-// demo does not initialize extra wallet SDKs alongside the browser prover.
-export const wagmiConfig = createConfig({
-  chains: [sepolia],
-  connectors: [injected({ shimDisconnect: true })],
-  transports: {
-    [sepolia.id]: http(),
-  },
+const chains = [sepolia] as const;
+const transports = {
+  [sepolia.id]: http(),
+} as const;
+
+const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID || 'YOUR_PROJECT_ID';
+
+// RainbowKit replaces YOUR_PROJECT_ID with its built-in demo id. Set
+// VITE_WALLETCONNECT_PROJECT_ID in Vercel for a production relay quota.
+export const rainbowWagmiConfig = getDefaultConfig({
+  appName: 'EIP-8182 Sepolia Demo',
+  appDescription: 'Browser-proved private transfers on Sepolia.',
+  ...(typeof window === 'undefined' ? {} : { appUrl: window.location.origin }),
+  projectId: walletConnectProjectId,
+  chains,
+  transports,
   ssr: false,
 });
