@@ -143,7 +143,7 @@ contract ShieldedPool is PoolGroth16Verifier {
     uint256 internal nextLeafIndex;
     uint256 internal currentNoteCommitmentRoot;
     uint256 internal noteCommitmentRootHistoryCount;
-    mapping(uint256 => uint256) private filledNoteCommitmentSubtrees;
+    mapping(uint256 => uint256) internal filledNoteCommitmentSubtrees;
     mapping(uint256 => uint256) internal noteCommitmentRootHistory;
 
     // Auth-policy registry (depth-32 sparse mutable, LSB-first key on
@@ -287,9 +287,7 @@ contract ShieldedPool is PoolGroth16Verifier {
         require(leafIndex0 + 3 <= MAX_LEAF_INDEX + 1, TreeFull());
         uint256[3] memory commitments = _sealTransactCommitments(publicInputs, leafIndex0);
         _pushNoteCommitmentRootHistory(currentNoteCommitmentRoot);
-        _insertNoteCommitment(commitments[0]);
-        _insertNoteCommitment(commitments[1]);
-        _insertNoteCommitment(commitments[2]);
+        _insertNoteCommitmentBatch3(commitments);
         _emitTransact(publicInputs, commitments, leafIndex0, outputNoteData0, outputNoteData1, outputNoteData2);
     }
 
@@ -624,7 +622,7 @@ contract ShieldedPool is PoolGroth16Verifier {
         authPolicyLastSnapshotBlock = block.number;
     }
 
-    function _insertNoteCommitment(uint256 commitment) private {
+    function _insertNoteCommitment(uint256 commitment) internal {
         uint256 index = nextLeafIndex;
         uint256 currentHash = commitment;
         for (uint256 level; level < COMMITMENT_TREE_DEPTH; ++level) {
@@ -637,6 +635,75 @@ contract ShieldedPool is PoolGroth16Verifier {
         }
         currentNoteCommitmentRoot = currentHash;
         nextLeafIndex = index + 1;
+    }
+
+    /// @dev Batched 3-leaf insertion. Functionally equivalent to three sequential
+    ///      `_insertNoteCommitment` calls, but pairs internal siblings within the
+    ///      batch before climbing, saving ~63 Poseidon2 hashes and ~60 SSTOREs
+    ///      per transfer.
+    function _insertNoteCommitmentBatch3(uint256[3] memory commitments) internal {
+        uint256 i0 = nextLeafIndex;
+        require(i0 + 3 <= MAX_LEAF_INDEX + 1, TreeFull());
+
+        uint256[3] memory activeIdx;
+        uint256[3] memory activeHash;
+        uint256 activeCount = 3;
+        activeIdx[0] = i0;
+        activeIdx[1] = i0 + 1;
+        activeIdx[2] = i0 + 2;
+        activeHash[0] = commitments[0];
+        activeHash[1] = commitments[1];
+        activeHash[2] = commitments[2];
+
+        for (uint256 h; h < COMMITMENT_TREE_DEPTH; ++h) {
+            uint256[3] memory nextIdxArr;
+            uint256[3] memory nextHashArr;
+            uint256 nextCount;
+            uint256 filledWriteValue;
+            bool filledWritePending;
+
+            uint256 k;
+            while (k < activeCount) {
+                uint256 idx = activeIdx[k];
+                uint256 hsh = activeHash[k];
+
+                if ((idx & 1) == 0) {
+                    filledWriteValue = hsh;
+                    filledWritePending = true;
+
+                    uint256 combined;
+                    if (k + 1 < activeCount && activeIdx[k + 1] == idx + 1) {
+                        combined = PoseidonFieldLib.merkleHash(hsh, activeHash[k + 1]);
+                        k += 2;
+                    } else {
+                        combined = PoseidonFieldLib.merkleHash(hsh, noteCommitmentEmptyHashes[h]);
+                        ++k;
+                    }
+                    nextIdxArr[nextCount] = idx >> 1;
+                    nextHashArr[nextCount] = combined;
+                    ++nextCount;
+                } else {
+                    uint256 combined = PoseidonFieldLib.merkleHash(filledNoteCommitmentSubtrees[h], hsh);
+                    nextIdxArr[nextCount] = idx >> 1;
+                    nextHashArr[nextCount] = combined;
+                    ++nextCount;
+                    ++k;
+                }
+            }
+
+            if (filledWritePending) {
+                filledNoteCommitmentSubtrees[h] = filledWriteValue;
+            }
+
+            activeCount = nextCount;
+            for (uint256 j; j < nextCount; ++j) {
+                activeIdx[j] = nextIdxArr[j];
+                activeHash[j] = nextHashArr[j];
+            }
+        }
+
+        currentNoteCommitmentRoot = activeHash[0];
+        nextLeafIndex = i0 + 3;
     }
 
     function _writeAuthPolicyTreeLeaf(uint256 key, uint256 leaf) private {

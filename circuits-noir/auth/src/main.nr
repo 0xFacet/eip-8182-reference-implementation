@@ -3,13 +3,15 @@
 // Public outputs (per Section 8.1):
 //   blinded_auth_commitment, transaction_intent_digest
 //
-// Adapted from the recursive-era auth circuit at commit 71e7d72. Key
-// adaptations vs that historical version:
-//   - 16-field intent matching the current Section 8.9 formula. Recipient
-//     and fee-recipient are bound as ownerNullifierKeyHash field elements
-//     rather than addresses; publicRecipientAddress is a new field.
-//   - 16-field EIP-712 struct including `blindingFactor` per Section 6.1
-//     normative MUST. (chainId carried by the domain separator; not in struct.)
+// Adapted from the recursive-era auth circuit at commit 71e7d72. This Sepolia
+// demo variant is transfer-only and assumes the user proves locally in the
+// browser. The EIP-712 signature binds only the fields the wallet must approve:
+// verifier, signer, token, private recipient owner hash, amount, nonce, and
+// expiry. Mode fields, public withdrawal recipient, fee fields, output locks,
+// and `blindingFactor` are not signed; the digest below supplies transfer/zero
+// constants and keeps `blindingFactor` as a private witness.
+//
+// Other adaptations vs that historical version:
 //   - 2-field public output `(blinded_auth_commitment, transaction_intent_digest)`
 //     instead of the historical recursive `InnerOutputs`.
 //   - In-circuit blinding step: blinded = poseidon(BLINDED_AUTH_COMMITMENT_DOMAIN,
@@ -46,7 +48,7 @@
 // step 1 is what ties the verifier-address slot in the digest to a value
 // the user actually authorized. Without `authVerifier` in the EIP-712
 // struct, a delegated prover with the same signed credential could route
-// it through a different verifier with different semantics. The 16-field
+// it through a different verifier with different semantics. The seven-field
 // `INTENT_TYPE_HASH` below puts `authVerifier` in slot 0 of the struct;
 // removing it would break the binding.
 //
@@ -74,21 +76,9 @@ pub struct Authorization {
 }
 
 use keccak256::keccak256;
-use privacy_pool_common::constants::{
-    LOCK_OUTPUT_BINDING_0,
-    LOCK_OUTPUT_BINDING_1,
-    LOCK_OUTPUT_BINDING_2,
-    PRIVACY_POOL_ADDRESS,
-    TRANSFER_OP,
-    WITHDRAWAL_OP,
-};
+use privacy_pool_common::constants::{PRIVACY_POOL_ADDRESS, TRANSFER_OP};
 use privacy_pool_common::digest::{blinded_auth_commitment, transaction_intent_digest};
-use privacy_pool_common::range::{
-    assert_address,
-    assert_amount,
-    assert_execution_constraints_flags,
-    assert_valid_until,
-};
+use privacy_pool_common::range::{assert_address, assert_amount, assert_valid_until};
 use crate::secp256k1::{Secp256k1PubKey, Signature};
 use crate::single_sig::SingleSigPolicy;
 
@@ -118,17 +108,12 @@ pub global VERSION_HASH: [u8; 32] = [
     0xcb, 0x4c, 0x67, 0x2f, 0x29, 0x8b, 0x8b, 0xc6,
 ];
 
-// keccak256("TransactionIntent(address authVerifier,address authorizingAddress,uint256 operationKind,address tokenAddress,uint256 recipientOwnerNullifierKeyHash,uint256 amount,uint256 feeNoteRecipientOwnerNullifierKeyHash,uint256 feeAmount,address publicRecipientAddress,uint256 executionConstraintsFlags,bytes32 lockedOutputBinding0,bytes32 lockedOutputBinding1,bytes32 lockedOutputBinding2,bytes32 nonce,uint256 validUntilSeconds,uint256 blindingFactor)")
-//
-// Section 6.1 normative MUST: companion ERCs must authenticate `blindingFactor`
-// via signature even though it is excluded from `transactionIntentDigest`.
-// Without it a delegated prover could re-pick `blindingFactor` and re-link
-// transactions for the same authorizing key.
+// keccak256("TransactionIntent(address authVerifier,address authorizingAddress,address tokenAddress,uint256 recipientOwnerNullifierKeyHash,uint256 amount,bytes32 nonce,uint256 validUntilSeconds)")
 pub global INTENT_TYPE_HASH: [u8; 32] = [
-    0xa1, 0x21, 0x65, 0x19, 0xa9, 0x77, 0x2c, 0xe0,
-    0xda, 0x46, 0x6e, 0xa6, 0x93, 0xfe, 0x69, 0x74,
-    0xc0, 0x38, 0x65, 0x75, 0x44, 0xd6, 0x06, 0x93,
-    0x9a, 0x58, 0x41, 0x7f, 0xcd, 0x35, 0x57, 0x1d,
+    0x29, 0xa3, 0xd4, 0x50, 0x48, 0x8d, 0x8d, 0x08,
+    0x41, 0x00, 0x11, 0xca, 0x11, 0x9c, 0x05, 0x65,
+    0x4e, 0x77, 0x16, 0xb6, 0x4e, 0x57, 0xc5, 0x4f,
+    0x34, 0x52, 0xcb, 0xc4, 0xb0, 0x8c, 0x1d, 0x8c,
 ];
 
 global FIELD_MODULUS_BYTES: [u8; 32] = [
@@ -141,20 +126,12 @@ global FIELD_MODULUS_BYTES: [u8; 32] = [
 global U128_SHIFT: Field = 340282366920938463463374607431768211456;
 
 fn main(
-    // 16 intent fields (private; bound by the EIP-712 signature)
+    // Signed transfer intent fields (private; bound by the EIP-712 signature).
     auth_verifier: Field,
     authorizing_address: Field,
-    operation_kind: Field,
     token_address: Field,
     recipient_owner_nullifier_key_hash: Field,
     amount: Field,
-    fee_note_recipient_owner_nullifier_key_hash: Field,
-    fee_amount: Field,
-    public_recipient_address: Field,
-    execution_constraints_flags: Field,
-    locked_output_binding0: Field,
-    locked_output_binding1: Field,
-    locked_output_binding2: Field,
     nonce: [u8; 32],
     valid_until_seconds: Field,
     execution_chain_id: Field,
@@ -165,23 +142,13 @@ fn main(
     blinding_factor: Field,
 ) -> pub (Field, Field) {
     // Range checks on bounded semantic types. recipient_owner_nullifier_key_hash
-    // and fee_note_recipient_owner_nullifier_key_hash are field elements
-    // (Poseidon outputs), not addresses, so no 160-bit range check applies.
+    // is a field element (Poseidon output), not an address, so no 160-bit range
+    // check applies.
     assert_address(auth_verifier);
     assert_address(authorizing_address);
-    assert_valid_operation_kind(operation_kind);
     assert_address(token_address);
     assert_amount(amount);
-    assert_amount(fee_amount);
-    assert_address(public_recipient_address);
-    assert_execution_constraints_flags(execution_constraints_flags);
     assert_valid_until(valid_until_seconds);
-    assert_lock_constraints(
-        execution_constraints_flags,
-        locked_output_binding0,
-        locked_output_binding1,
-        locked_output_binding2,
-    );
 
     // Bind the authorizing address to the secp256k1 public key.
     let signer = Secp256k1PubKey { x: pubkey_x, y: pubkey_y };
@@ -196,21 +163,12 @@ fn main(
     let signing_hash = eip712_signing_hash(
         auth_verifier,
         authorizing_address,
-        operation_kind,
         token_address,
         recipient_owner_nullifier_key_hash,
         amount,
-        fee_note_recipient_owner_nullifier_key_hash,
-        fee_amount,
-        public_recipient_address,
-        execution_constraints_flags,
-        locked_output_binding0,
-        locked_output_binding1,
-        locked_output_binding2,
         nonce,
         valid_until_seconds,
         execution_chain_id,
-        blinding_factor,
     );
 
     // ECDSA verify (Noir stdlib).
@@ -227,17 +185,17 @@ fn main(
     let intent_digest = transaction_intent_digest(
         auth_verifier,
         authorizing_address,
-        operation_kind,
+        TRANSFER_OP,
         token_address,
         recipient_owner_nullifier_key_hash,
         amount,
-        fee_note_recipient_owner_nullifier_key_hash,
-        fee_amount,
-        public_recipient_address,
-        execution_constraints_flags,
-        locked_output_binding0,
-        locked_output_binding1,
-        locked_output_binding2,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
         nonce_field,
         valid_until_seconds,
         execution_chain_id,
@@ -246,81 +204,28 @@ fn main(
     (blinded, intent_digest)
 }
 
-fn assert_valid_operation_kind(operation_kind: Field) {
-    assert(
-        (operation_kind - TRANSFER_OP) * (operation_kind - WITHDRAWAL_OP) == 0,
-        "invalid operation kind",
-    );
-}
-
-fn assert_lock_constraints(
-    flags: Field,
-    b0: Field,
-    b1: Field,
-    b2: Field,
-) {
-    flags.assert_max_bit_size::<3>();
-    if !is_flag_set(flags, LOCK_OUTPUT_BINDING_0) {
-        assert(b0 == 0, "unlocked output binding must be zero");
-    }
-    if !is_flag_set(flags, LOCK_OUTPUT_BINDING_1) {
-        assert(b1 == 0, "unlocked output binding must be zero");
-    }
-    if !is_flag_set(flags, LOCK_OUTPUT_BINDING_2) {
-        assert(b2 == 0, "unlocked output binding must be zero");
-    }
-}
-
-fn is_flag_set(flags: Field, bit: Field) -> bool {
-    if bit == LOCK_OUTPUT_BINDING_0 {
-        (flags == 1) | (flags == 3) | (flags == 5) | (flags == 7)
-    } else if bit == LOCK_OUTPUT_BINDING_1 {
-        (flags == 2) | (flags == 3) | (flags == 6) | (flags == 7)
-    } else {
-        (flags == 4) | (flags == 5) | (flags == 6) | (flags == 7)
-    }
-}
-
 fn eip712_signing_hash(
     auth_verifier: Field,
     authorizing_address: Field,
-    operation_kind: Field,
     token_address: Field,
     recipient_owner_nullifier_key_hash: Field,
     amount: Field,
-    fee_note_recipient_owner_nullifier_key_hash: Field,
-    fee_amount: Field,
-    public_recipient_address: Field,
-    execution_constraints_flags: Field,
-    locked_output_binding0: Field,
-    locked_output_binding1: Field,
-    locked_output_binding2: Field,
     nonce: [u8; 32],
     valid_until_seconds: Field,
     execution_chain_id: Field,
-    blinding_factor: Field,
 ) -> [u8; 32] {
     // hashStruct(TransactionIntent) = keccak(typeHash || encoded fields).
-    // 16 fields x 32 bytes + 32 bytes typehash = 544 bytes.
-    let mut struct_preimage: [u8; 544] = [0; 544];
+    // 7 fields x 32 bytes + 32 bytes typehash = 256 bytes.
+    let mut struct_preimage: [u8; 256] = [0; 256];
     write_bytes32(INTENT_TYPE_HASH, &mut struct_preimage, 0);
     write_field_as_u256(auth_verifier,                                 &mut struct_preimage, 32);
     write_field_as_u256(authorizing_address,                           &mut struct_preimage, 64);
-    write_field_as_u256(operation_kind,                                &mut struct_preimage, 96);
-    write_field_as_u256(token_address,                                 &mut struct_preimage, 128);
-    write_field_as_u256(recipient_owner_nullifier_key_hash,            &mut struct_preimage, 160);
-    write_field_as_u256(amount,                                        &mut struct_preimage, 192);
-    write_field_as_u256(fee_note_recipient_owner_nullifier_key_hash,   &mut struct_preimage, 224);
-    write_field_as_u256(fee_amount,                                    &mut struct_preimage, 256);
-    write_field_as_u256(public_recipient_address,                      &mut struct_preimage, 288);
-    write_field_as_u256(execution_constraints_flags,                   &mut struct_preimage, 320);
-    write_field_as_u256(locked_output_binding0,                        &mut struct_preimage, 352);
-    write_field_as_u256(locked_output_binding1,                        &mut struct_preimage, 384);
-    write_field_as_u256(locked_output_binding2,                        &mut struct_preimage, 416);
-    write_bytes32(nonce,                                               &mut struct_preimage, 448);
-    write_field_as_u256(valid_until_seconds,                           &mut struct_preimage, 480);
-    write_field_as_u256(blinding_factor,                               &mut struct_preimage, 512);
-    let struct_hash = keccak256(struct_preimage, 544);
+    write_field_as_u256(token_address,                                 &mut struct_preimage, 96);
+    write_field_as_u256(recipient_owner_nullifier_key_hash,            &mut struct_preimage, 128);
+    write_field_as_u256(amount,                                        &mut struct_preimage, 160);
+    write_bytes32(nonce,                                               &mut struct_preimage, 192);
+    write_field_as_u256(valid_until_seconds,                           &mut struct_preimage, 224);
+    let struct_hash = keccak256(struct_preimage, 256);
 
     // domainSeparator = keccak(typeHash || nameHash || versionHash || chainId || verifyingContract).
     let mut domain_preimage: [u8; 160] = [0; 160];

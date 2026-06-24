@@ -1,0 +1,60 @@
+{
+  "name": "@eip-8182/sepolia-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Sepolia demo app and SDK for EIP-8182 private transfers.",
+  "license": "CC0-1.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "npm run build:sdk && npm run prepare:browser-prover && npm run build:app",
+    "build:app": "vite build",
+    "build:sdk": "tsc -p tsconfig.json",
+    "dev": "npm run prepare:browser-prover && vite --host 127.0.0.1",
+    "prepare:browser-prover": "node scripts/prepare-browser-prover-assets.mjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "prover": "npm run build:sdk && node server/prover-server.mjs",
+    "smoke:e2e": "npm run build:sdk && node scripts/e2e-smoke.mjs",
+    "typecheck": "npm run typecheck:sdk && npm run typecheck:app",
+    "typecheck:app": "tsc -p tsconfig.app.json --noEmit",
+    "typecheck:sdk": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "test:contracts": "forge test --root ."
+  },
+  "dependencies": {
+    "@aztec/bb.js": "^4.0.0-nightly.20260120",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.0.1",
+    "@noble/post-quantum": "^0.6.1",
+    "@noir-lang/acvm_js": "^1.0.0-beta.19",
+    "@noir-lang/noir_js": "^1.0.0-beta.19",
+    "@noir-lang/noirc_abi": "^1.0.0-beta.19",
+    "@rainbow-me/rainbowkit": "^2.2.11",
+    "@tanstack/react-query": "^5.101.1",
+    "buffer": "^6.0.3",
+    "ethers": "^6.13.4",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "snarkjs": "^0.7.6",
+    "viem": "^2.53.1",
+    "vite-plugin-node-polyfills": "^0.28.0",
+    "wagmi": "^2.19.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "typescript": "^5.8.3",
+    "vite": "^7.3.5",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>EIP-8182 — Browser Pool-Proof Demo</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: #111;
+      --bg: #fafafa;
+      --muted: #666;
+      --accent: #0066cc;
+      --ok: #198754;
+      --err: #c0392b;
+      --code-bg: #f0f0f0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #eee;
+        --bg: #111;
+        --muted: #888;
+        --accent: #5aa9ff;
+        --code-bg: #1f1f1f;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      -webkit-text-size-adjust: 100%;
+    }
+    main {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 24px 20px 64px;
+    }
+    h1 {
+      font-size: 22px;
+      margin: 0 0 4px;
+      font-weight: 600;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 14px;
+      margin: 0 0 24px;
+    }
+    .device {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      margin-bottom: 24px;
+      word-break: break-word;
+    }
+    button {
+      width: 100%;
+      padding: 18px 16px;
+      font-size: 17px;
+      font-weight: 600;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    button:active:not(:disabled) {
+      transform: scale(0.98);
+    }
+    .status {
+      margin-top: 24px;
+      font-size: 14px;
+      color: var(--muted);
+      min-height: 24px;
+    }
+    .results {
+      margin-top: 16px;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(127, 127, 127, 0.18);
+      font-variant-numeric: tabular-nums;
+    }
+    .row .label { font-size: 14px; }
+    .row .val {
+      font-size: 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .row.headline .label,
+    .row.headline .val {
+      font-weight: 700;
+      font-size: 16px;
+    }
+    .row.ok .val { color: var(--ok); }
+    .row.err .val { color: var(--err); }
+    .runs {
+      margin-top: 24px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .runs table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+    .runs th, .runs td {
+      text-align: right;
+      padding: 6px 8px;
+      border-bottom: 1px solid rgba(127, 127, 127, 0.15);
+    }
+    .runs th:first-child, .runs td:first-child { text-align: left; }
+    .runs th { color: var(--muted); font-weight: 500; }
+    details {
+      margin-top: 24px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    details summary {
+      cursor: pointer;
+      user-select: none;
+      padding: 8px 0;
+    }
+    .notes {
+      margin-top: 32px;
+      padding: 16px;
+      background: var(--code-bg);
+      border-radius: 10px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .notes p { margin: 0 0 8px; }
+    .notes p:last-child { margin-bottom: 0; }
+    .notes code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>EIP-8182 pool-proof, in the browser</h1>
+    <p class="sub">Runs the EIP-8182 reference pool circuit end-to-end (witness gen + Groth16 prove) using snarkjs WASM. No native code, no app install.</p>
+
+    <div class="device" id="device"></div>
+
+    <button id="run" disabled>Loading assets…</button>
+
+    <div class="status" id="status"></div>
+
+    <div class="results" id="results"></div>
+
+    <div class="runs" id="runs"></div>
+
+    <details>
+      <summary>What this actually does</summary>
+      <div class="notes">
+        <p>Click Run and the browser will:</p>
+        <p>1. Load a pre-built witness input (12 KB) — the same worst-case
+        witness this repo's tests use, with all three outputs real and all
+        three output bindings locked.</p>
+        <p>2. Run snarkjs's WASM witness generator (332 KB) against
+        <code>pool.wasm</code> to produce the witness binary (~1.3 MB
+        in memory).</p>
+        <p>3. Run snarkjs's WASM Groth16 prover against the proving key
+        (<code>pool_final.zkey</code>, 27 MB) to produce a 256-byte BN254
+        Groth16 proof + 19 public-input field elements.</p>
+        <p>4. Verify the proof locally against <code>pool_vkey.json</code>
+        as a sanity check that the WASM stack actually produced a valid
+        proof.</p>
+        <p>All four steps are timed separately. The headline number is the
+        prove step — that's what dominates wallet UX on phones. Witness gen
+        is small but still part of the user-facing latency.</p>
+        <p>This is the <em>slow path</em> for proving: pure WASM,
+        single-threaded. A wallet would ship native <a href="https://github.com/iden3/rapidsnark">rapidsnark</a>
+        for ~10× speedup over the numbers you see here.</p>
+      </div>
+    </details>
+
+    <div class="notes" style="margin-top: 24px;">
+      <p><strong>About:</strong> reference impl for <a href="https://eips.ethereum.org/EIPS/eip-8182">EIP-8182 Native Shielded Pool</a> (Groth16/BN254 split-proof variant). 42,959 constraints, 19 public inputs, 26 MB zkey. Source: <code>circuits/pool/pool.circom</code> in the reference impl repo.</p>
+    </div>
+  </main>
+
+  <script src="./assets/snarkjs.min.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fmt = (ms) => ms < 1 ? "<1 ms" : ms < 1000 ? `${ms.toFixed(0)} ms` : `${(ms / 1000).toFixed(2)} s`;
+
+    function describeDevice() {
+      const ua = navigator.userAgent;
+      const cores = navigator.hardwareConcurrency || "unknown";
+      const mem = navigator.deviceMemory ? `${navigator.deviceMemory} GB` : "unknown";
+      let device = "browser";
+      if (/iPhone|iPad/.test(ua)) {
+        const m = ua.match(/OS (\d+)_/);
+        device = `${ua.includes("iPad") ? "iPad" : "iPhone"} (iOS ${m ? m[1] : "?"})`;
+      } else if (/Android/.test(ua)) {
+        const m = ua.match(/Android (\d+)/);
+        const model = (ua.match(/;\s*([^;)]+)\s*Build/) || [])[1];
+        device = `Android ${m ? m[1] : "?"}${model ? `, ${model.trim()}` : ""}`;
+      } else if (/Mac/.test(ua)) {
+        device = "Mac";
+      } else if (/Windows/.test(ua)) {
+        device = "Windows";
+      } else if (/Linux/.test(ua)) {
+        device = "Linux";
+      }
+      return `${device} · ${cores} cores · ${mem} RAM`;
+    }
+
+    $("device").textContent = describeDevice();
+
+    // Pre-fetch all assets so the first run timing isn't dominated by network.
+    async function fetchBlob(url, label) {
+      $("status").textContent = `Loading ${label}…`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`${url}: ${r.status}`);
+      const buf = await r.arrayBuffer();
+      return new Uint8Array(buf);
+    }
+
+    let wasmBytes, zkeyBytes, vk, input;
+    let runs = [];
+
+    (async () => {
+      try {
+        const t0 = performance.now();
+        [wasmBytes, zkeyBytes, vk, input] = await Promise.all([
+          fetchBlob("./assets/pool.wasm", "witness generator (332 KB)"),
+          fetchBlob("./assets/pool_final.zkey", "proving key (27 MB)"),
+          fetch("./assets/pool_vkey.json").then(r => r.json()),
+          fetch("./assets/input.json").then(r => r.json()),
+        ]);
+        $("status").textContent = `Assets ready (${fmt(performance.now() - t0)} to load). Tap Run.`;
+        $("run").disabled = false;
+        $("run").textContent = "Run pool proof";
+      } catch (e) {
+        $("status").innerHTML = `<span style="color:var(--err)">Failed to load assets: ${e.message}</span>`;
+      }
+    })();
+
+    async function runOnce() {
+      const results = $("results");
+      results.innerHTML = "";
+      $("status").textContent = "Generating witness…";
+      $("run").disabled = true;
+
+      try {
+        const tWitnessStart = performance.now();
+        const wtns = { type: "mem" };
+        await snarkjs.wtns.calculate(input, wasmBytes, wtns);
+        const tWitness = performance.now() - tWitnessStart;
+
+        $("status").textContent = "Proving…";
+        // Yield to allow the status text to paint before the blocking prove call.
+        await new Promise(r => setTimeout(r, 0));
+
+        const tProveStart = performance.now();
+        const { proof, publicSignals } = await snarkjs.groth16.prove(zkeyBytes, wtns);
+        const tProve = performance.now() - tProveStart;
+
+        $("status").textContent = "Verifying…";
+        await new Promise(r => setTimeout(r, 0));
+
+        const tVerifyStart = performance.now();
+        const ok = await snarkjs.groth16.verify(vk, publicSignals, proof);
+        const tVerify = performance.now() - tVerifyStart;
+
+        const tTotal = tWitness + tProve + tVerify;
+
+        results.innerHTML = `
+          <div class="row"><span class="label">Witness gen</span><span class="val">${fmt(tWitness)}</span></div>
+          <div class="row headline"><span class="label">Prove</span><span class="val">${fmt(tProve)}</span></div>
+          <div class="row"><span class="label">Verify (local sanity)</span><span class="val">${fmt(tVerify)}</span></div>
+          <div class="row ${ok ? "ok" : "err"}"><span class="label">Proof valid?</span><span class="val">${ok ? "yes" : "NO"}</span></div>
+          <div class="row headline"><span class="label">Total</span><span class="val">${fmt(tTotal)}</span></div>
+        `;
+
+        runs.push({ witness: tWitness, prove: tProve, verify: tVerify, total: tTotal, ok });
+        renderRuns();
+        $("status").textContent = `Done. Tap Run again to measure a steady-state proof (no asset reload).`;
+      } catch (e) {
+        results.innerHTML = `<div class="row err"><span class="label">Error</span><span class="val">${e.message}</span></div>`;
+        $("status").textContent = "";
+      } finally {
+        $("run").disabled = false;
+      }
+    }
+
+    function renderRuns() {
+      if (runs.length < 2) {
+        $("runs").innerHTML = "";
+        return;
+      }
+      const rows = runs.map((r, i) => `
+        <tr>
+          <td>${i === 0 ? "1 (cold)" : i + 1}</td>
+          <td>${r.witness.toFixed(0)}</td>
+          <td>${r.prove.toFixed(0)}</td>
+          <td>${r.verify.toFixed(0)}</td>
+          <td>${r.total.toFixed(0)}</td>
+        </tr>
+      `).join("");
+      $("runs").innerHTML = `
+        <table>
+          <thead>
+            <tr><th>run</th><th>witness ms</th><th>prove ms</th><th>verify ms</th><th>total ms</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+
+    $("run").addEventListener("click", runOnce);
+  </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+.vite/
+cache/
+broadcast/
+.env
+.env.*
+app/public/prover/
