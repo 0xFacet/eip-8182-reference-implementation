@@ -671,8 +671,10 @@ function App() {
       <header className="topbar">
         <div className="brandBlock">
           <div className="eyebrow">Sepolia demo</div>
-          <h1>EIP-8182 private transfer lab</h1>
-          <p>Set up a wallet-authenticated profile, publish post-quantum receive keys, deposit encrypted ETH, and prove a private transfer entirely in this browser.</p>
+          <h1>Private transfer app demo</h1>
+          <p>
+            This is an example app built on <a href="https://eip8182.com" target="_blank" rel="noreferrer">EIP-8182</a>. It lets you set up a wallet-authenticated profile, publish post-quantum receive keys, shield Sepolia ETH, and prove a private transfer entirely in this browser.
+          </p>
           <div className="heroTags" aria-label="Demo capabilities">
             <span>ML-KEM-768 delivery</span>
             <span>ECDSA auth method</span>
@@ -695,18 +697,37 @@ function App() {
         </section>
       )}
 
-      <section className="demoBrief" aria-label="Demo walkthrough">
-        <div>
-          <strong>What this shows</strong>
-          <span>Applications can add private transfers without taking over the wallet. The wallet signs an intent; the browser proves the spend.</span>
+      <section className="protocolSplit" aria-label="Protocol versus demo app choices">
+        <div className="protocolSplitHeader">
+          <span>Protocol vs app</span>
+          <p>EIP-8182 defines the shared pool and proof interface. This demo makes opinionated product choices around that core.</p>
         </div>
-        <div>
-          <strong>What stays local</strong>
-          <span>Spend keys, note secrets, decrypted notes, and proving witnesses live in this browser profile.</span>
-        </div>
-        <div>
-          <strong>What goes on-chain</strong>
-          <span>Public keys for delivery, an auth-policy commitment, encrypted note data, nullifiers, and proof-checked commitments.</span>
+        <div className="protocolRows">
+          <div className="protocolColumnHeader" aria-hidden="true">
+            <span>Area</span>
+            <span>Protocol</span>
+            <span>This app</span>
+          </div>
+          <div className="protocolRow">
+            <strong>Note payload encryption</strong>
+            <p>Output note data is opaque bytes; the pool only checks its hash.</p>
+            <p>Uses a public registry to find receive keys, then encrypts note details with ML-KEM-768 plus X25519.</p>
+          </div>
+          <div className="protocolRow">
+            <strong>Auth method</strong>
+            <p>Users can register, rotate, or revoke permissionless auth methods.</p>
+            <p>Uses ECDSA wallet signatures proven with UltraHonk. That flow is user-friendly, but costs more gas than a leaner auth method.</p>
+          </div>
+          <div className="protocolRow">
+            <strong>Proving</strong>
+            <p>Requires valid pool and auth proofs, but does not require where they are generated.</p>
+            <p>Proves locally in browser WASM so there is no prover server.</p>
+          </div>
+          <div className="protocolRow">
+            <strong>Transaction sender</strong>
+            <p>Hides in-pool sender, recipient, amount, spent note, and change.</p>
+            <p>Submits from your wallet directly, so relayers or AA would be needed to hide the public tx sender.</p>
+          </div>
         </div>
       </section>
 
@@ -722,7 +743,7 @@ function App() {
               <span>{setupComplete ? 'ready' : 'required'}</span>
             </div>
             <p className="stepIntro">
-              One wallet signature deterministically creates this demo profile. It gives the browser private spending material and gives other users public encryption keys for sending notes to you.
+              One wallet signature deterministically creates this demo profile. It gives the browser private spending material and receive keys. The public keys are posted only so this demo can discover recipients without invite strings.
             </p>
             {setupComplete ? (
               <details className="setupDetails">
@@ -747,7 +768,7 @@ function App() {
                 <div className="setupRow">
                   <div>
                     <strong>Post PQ receive keys</strong>
-                    <span>Publishes your ML-KEM-768 and X25519 public keys. Senders use them for trial-encryptable note delivery.</span>
+                    <span>Publishes your ML-KEM-768 and X25519 public keys to the demo registry. Senders use them for trial-encryptable note delivery; the pool still treats note data as opaque bytes.</span>
                   </div>
                   <span className="setupState">{recipientProfileMismatch ? 'different profile' : recipientPublished ? 'published' : 'needed'}</span>
                   <div className="setupActions">
@@ -769,7 +790,7 @@ function App() {
                 <div className="setupRow">
                   <div>
                     <strong>Register auth method</strong>
-                    <span>Records the ECDSA auth-policy commitment in the pool. Later, the wallet signs the transfer intent and the browser proves that signature.</span>
+                    <span>Records a hidden ECDSA auth-policy commitment in the pool. Later, the wallet signs the transfer intent and the browser proves that signature. Real wallets can rotate or deactivate methods by updating the policy set.</span>
                   </div>
                   <span className="setupState">{authPolicyProfileMismatch ? 'different profile' : authRegistered ? 'registered' : 'needed'}</span>
                   <button type="button" onClick={registerAuthPolicy} disabled={!profileSigned || !recipientPublished || authRegistered || authPolicyProfileMismatch || !authReady || busy !== ''}>
@@ -778,7 +799,7 @@ function App() {
                 </div>
                 {authPolicyProfileMismatch && (
                   <p className="inlineWarning">
-                    This wallet has pool auth for owner hash {shortField(authPolicyOwnerHash)}. The pool cannot clear auth policies; restore that browser profile, switch wallet accounts, or use a fresh demo pool.
+                    This wallet has pool auth for owner hash {shortField(authPolicyOwnerHash)}. The owner hash is permanent for this address; restore that browser profile, switch wallet accounts, or use a fresh demo pool. Auth methods can be rotated, but that does not replace the registered owner hash.
                   </p>
                 )}
               </div>
@@ -792,19 +813,19 @@ function App() {
             <div className="stepHeader">
               <div>
                 <span className="stepKicker">Private balance</span>
-                <h2>Deposit encrypted ETH</h2>
+                <h2>Shield ETH</h2>
               </div>
               <span>Sepolia ETH</span>
             </div>
             <p className="stepIntro">
-              The deposit creates an encrypted note to your own posted keys. Sepolia sees ETH enter the pool; your browser scans events and decrypts the note into a private balance.
+              Shielding creates a note owned by your posted keys. Sepolia sees the depositor and deposit amount; your browser scans events and decrypts only the note payloads it can spend.
             </p>
             <label>
               Amount
               <input value={depositAmount} onChange={(event) => setDepositAmount(event.target.value)} inputMode="decimal" />
             </label>
             <button type="button" onClick={depositToPool} disabled={!setupComplete || busy !== ''}>
-              Deposit
+              Shield ETH
             </button>
           </div>
         </section>
@@ -820,7 +841,7 @@ function App() {
               <span>{formatEth(privateBalance)} ETH private</span>
             </div>
             <p className="stepIntro">
-              Send looks up the recipient's post-quantum public keys, encrypts recipient and change notes, asks the wallet to sign the minimal intent, proves pool plus auth in WASM, and submits one transaction.
+              Send looks up app-layer receive keys, encrypts the recipient and change note details, asks the wallet to sign the minimal intent, proves pool plus auth in WASM, and submits one transaction. Without a relayer, your address is still visible as the transaction sender.
             </p>
             <label>
               Recipient
@@ -830,7 +851,7 @@ function App() {
                 placeholder="0x..."
               />
               <span className="fieldHint">
-                Demo recipients must have posted receive keys first. We prefill your connected address so you can send to yourself; replace it with another registered Sepolia address to send to someone else.
+                Demo recipients must have posted receive keys first. We prefill your connected address so you can send to yourself; use 0xc2172a6315c1d7f6855768f843c420ebb36eda97 or another registered Sepolia address to send to someone else.
               </span>
             </label>
             <label>

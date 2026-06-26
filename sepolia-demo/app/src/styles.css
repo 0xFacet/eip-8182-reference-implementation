@@ -115,7 +115,6 @@ main {
 .eyebrow,
 .stepKicker,
 .statusTitle,
-.demoBrief strong,
 .technicalCounts {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
@@ -151,6 +150,15 @@ h1 {
   color: rgba(0, 0, 0, 0.74);
   font-size: 18px;
   line-height: 1.55;
+}
+
+.topbar a {
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--magenta);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 3px;
 }
 
 .heroTags {
@@ -205,39 +213,75 @@ h1 {
   font-size: 0.94em;
 }
 
-.demoBrief {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0;
+.protocolSplit {
   border: 2px solid var(--ink);
   border-radius: 8px;
   overflow: hidden;
   margin-top: 26px;
-  background: var(--ink);
+  background: var(--panel);
+  box-shadow: 5px 5px 0 var(--ink);
 }
 
-.demoBrief div {
-  min-width: 0;
-  background: var(--panel);
+.protocolSplitHeader {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr);
+  gap: 18px;
+  align-items: baseline;
+  border-bottom: 2px solid var(--ink);
+  background: #fffff8;
   padding: 16px;
 }
 
-.demoBrief div + div {
-  border-left: 2px solid var(--ink);
-}
-
-.demoBrief strong,
-.demoBrief span {
+.protocolSplitHeader span,
+.protocolRow strong {
   display: block;
-}
-
-.demoBrief strong {
   color: var(--magenta);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.demoBrief span {
-  margin-top: 7px;
+.protocolSplitHeader p {
   color: var(--muted);
+  line-height: 1.45;
+}
+
+.protocolRows {
+  display: grid;
+}
+
+.protocolColumnHeader {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  border-bottom: 2px solid var(--ink);
+  background: var(--ink);
+  color: var(--yellow);
+  padding: 10px 16px;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.protocolRow {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  min-width: 0;
+  padding: 15px 16px;
+}
+
+.protocolRow + .protocolRow {
+  border-top: 2px solid var(--line);
+}
+
+.protocolRow p {
+  color: var(--muted);
+  font-size: 14px;
   line-height: 1.45;
 }
 
@@ -748,13 +792,42 @@ label {
     justify-content: flex-start;
   }
 
-  .demoBrief {
-    grid-template-columns: 1fr;
+  .protocolSplit {
+    box-shadow: 3px 3px 0 var(--ink);
   }
 
-  .demoBrief div + div {
-    border-top: 2px solid var(--ink);
-    border-left: 0;
+  .protocolSplitHeader,
+  .protocolColumnHeader,
+  .protocolRow {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .protocolColumnHeader {
+    display: none;
+  }
+
+  .protocolRow p::before {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--ink);
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .protocolRow p:nth-of-type(1)::before {
+    content: "Protocol";
+  }
+
+  .protocolRow p:nth-of-type(2)::before {
+    content: "This app";
+  }
+
+  .protocolRow p {
+    max-width: 720px;
   }
 
   .panel,
