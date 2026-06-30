@@ -679,6 +679,7 @@ function App() {
             <span>ML-KEM-768 delivery</span>
             <span>ECDSA auth method</span>
             <span>WASM proving</span>
+            <a href="https://github.com/0xFacet/eip-8182-reference-implementation/tree/main/sepolia-demo" target="_blank" rel="noreferrer">Source code</a>
           </div>
         </div>
         <div className="walletControl">
