@@ -1,5 +1,4 @@
 dist/
 public/prover/
-src/generated/
 .playwright-mcp/
 ../contracts/lib
