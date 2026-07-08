@@ -1,0 +1,6 @@
+dist
+node_modules
+target
+export
+gates_report.json
+package-lock.json

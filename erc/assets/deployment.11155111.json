@@ -1,0 +1,28 @@
+{
+  "chainId": 11155111,
+  "factory": "0x4e59b44847b379578588920ca78fbf26c0b4956c",
+  "poseidonLib": "0x1f74ed00e1192946a03a731914fb515e9229b0ad",
+  "registry": "0x019272baf7fa80d3e5ef8e18f90c8bca2fd2a428",
+  "poolVerifier": "0xf9b3233603f2bd2b276b28d35eda2259b3eaf1b5",
+  "honkVerifier": "0xb9168a501cdd14c54b6f42516ce91ed9450c79be",
+  "ecdsaAuthVerifier": "0xbb823cbdd56ed936ca5c5d072399281c276b5346",
+  "demoAuthCore": "0xea47f52684fcfe95f70aff6f6b4c06d506d318ef",
+  "demoAuthVerifier": "0xda44cb27299fa0b81ce322ada3c4c27d3712a3f3",
+  "allowlistPolicyVerifier": "0x7bcad19dc94cab2a9e8d4da6f3c786f932956456",
+  "poolPolicyFree": "0xbbac4703cbb70e3e685ea89585f3de4b3bfb9b01",
+  "poolAllowlistGated": "0x136cfa62a6230824ce1cec2e4257f69da208cb08",
+  "publicActionRouter": "0x57ad2a68e0984bd1676e5e651a9eb122fbb63105",
+  "deployer": "0x97810bC796b9c25515C4a5edF91E81407aDc5709",
+  "deploymentBlocks": {
+    "registry": 11230917,
+    "poolPolicyFree": 11230925,
+    "poolAllowlistGated": 11230927,
+    "publicActionRouter": 11230928,
+    "ZKTranscriptLib": 11230918,
+    "honkVerifier": 11230919,
+    "ecdsaAuthVerifier": 11230921,
+    "demoAuthCore": 11230922,
+    "demoAuthVerifier": 11230923,
+    "allowlistPolicyVerifier": 11230924
+  }
+}

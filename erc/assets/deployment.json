@@ -1,0 +1,24 @@
+{
+  "factory": "0x4e59b44847b379578588920ca78fbf26c0b4956c",
+  "poseidonLib": {
+    "contract": "LibPoseidon2Permute",
+    "salt": "0xdaf5811507b4461486bb84c695275f0f264b3254e6cb1a35f5a13d29a2892e21",
+    "address": "0x1f74ed00e1192946a03a731914fb515e9229b0ad",
+    "initCodeHash": "0xb0beab3c768feb1d0c93953dfa940f6d0503cf90404cd3381f11d26e391b40da",
+    "runtimeCodeHash": "0x63b7d7420bd3c1456c5a87cfa89f34aba0f5458887d82883c18b32a84ed56c72"
+  },
+  "registry": {
+    "contract": "PrivacyIdentityRegistry",
+    "salt": "0xba678cf695eb1d2a80814aa5072bd0fd2ebca8d5f2ff91bebbf7b1d3d9151bfd",
+    "address": "0x8e56eb24f40d1e85195af82db9c41a56ee9bd27e",
+    "initCodeHash": "0xcc184f044e86330e0803d42fdf08d67cfc6a886b5fb7779a89356eeeca721e87",
+    "runtimeCodeHash": "0xaa49575006c707a992af9dceff56fb78a922344943437cfef409507e4f1d47e6"
+  },
+  "poolVerifier": {
+    "contract": "CanonicalPoolVerifier",
+    "salt": "0x35586c4a91c566196a6447b3c32c9ff02f4637a40ffa43c673331fa77e8cc7be",
+    "address": "0xf9b3233603f2bd2b276b28d35eda2259b3eaf1b5",
+    "initCodeHash": "0xf5972b26224958e37d1c808f05b5f13ac8f363de83120351f46759b4ae5a43f7",
+    "runtimeCodeHash": "0x47ed09e150490e8d63e87a1e2da1ff3a325e56809e1342174e6fe891b1d449a6"
+  }
+}

@@ -1,0 +1,533 @@
+{
+  "generator": "erc/scripts/gen_vectors.ts",
+  "chainId": "0x7a69",
+  "poolAddress": "0x700000000000000000000000000000000000a001",
+  "authVerifier": "0x700000000000000000000000000000000000aa01",
+  "policyVerifier": "0x700000000000000000000000000000000000cc01",
+  "router": "0x700000000000000000000000000000000000dd01",
+  "sampleDownstreamActionCommitment": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+  "emptyPolicyDataHash": "0x4410c360230a295b13d66d8d6c1a24c44311531e39c64f66c7301b49d85a46c",
+  "dummyOwnerNullifierKeyHash": "0x559c804a340eccb91c044add95fb6a4f9d4438b52010df25f8aa1e1ffa052",
+  "identities": {
+    "sender": {
+      "address": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "privateKey": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+      "ownerNullifierKey": "0xa11ce",
+      "ownerNullifierKeyHash": "0x12b828fa9f4d93bfcf0598082021988fba98861d279dc939fd8bb1f30fe2c724",
+      "noteSecretSeed": "0x5eed",
+      "noteSecretSeedHash": "0x2af7923d7f3e67f4aaf13941d3a0329881f1337f9a194fbf7b3d360b57ee20b3",
+      "registrationBlinder": "0xb11d",
+      "policyCommitment": "0xd89bff27c901fe1a54ce25acdde6befd8ab5e4afa7e4aac6ccb9a4fe93a6d22",
+      "policySlot": "3",
+      "policySetCommitment": "0x2427870fec880f919f41955f216ac7fe2eeefeea1a62fff4705ab08da5e37162",
+      "policySetSiblings": [
+        "0x0",
+        "0xb63a53787021a4a962a452c2921b3663aff1ffd8d5510540f8e659e782956f1",
+        "0xe34ac2c09f45a503d2908bcb12f1cbae5fa4065759c88d501c097506a8b2290",
+        "0x21f9172d72fdcdafc312eee05cf5092980dda821da5b760a9fb8dbdf607c8a20",
+        "0x2373ea368857ec7af97e7b470d705848e2bf93ed7bef142a490f2119bcf82d8e",
+        "0x120157cfaaa49ce3da30f8b47879114977c24b266d58b0ac18b325d878aafddf",
+        "0x1c28fe1059ae0237b72334700697bdf465e03df03986fe05200cadeda66bd76",
+        "0x2d78ed82f93b61ba718b17c2dfe5b52375b4d37cbbed6f1fc98b47614b0cf21b"
+      ],
+      "leafPosition": "1",
+      "identityLeaf": "0x14d76db22d93f424cf75fdeb504b4b27ae68963f8ab87c8c0ac377972e2452fb",
+      "identitySiblings": [
+        "0x0",
+        "0x27547d14c78ad5052d4617c87a053a3dec074fd048964297391e67f250372c11",
+        "0xe34ac2c09f45a503d2908bcb12f1cbae5fa4065759c88d501c097506a8b2290",
+        "0x21f9172d72fdcdafc312eee05cf5092980dda821da5b760a9fb8dbdf607c8a20",
+        "0x2373ea368857ec7af97e7b470d705848e2bf93ed7bef142a490f2119bcf82d8e",
+        "0x120157cfaaa49ce3da30f8b47879114977c24b266d58b0ac18b325d878aafddf",
+        "0x1c28fe1059ae0237b72334700697bdf465e03df03986fe05200cadeda66bd76",
+        "0x2d78ed82f93b61ba718b17c2dfe5b52375b4d37cbbed6f1fc98b47614b0cf21b",
+        "0x67243231eddf4222f3911defbba7705aff06ed45960b27f6f91319196ef97e1",
+        "0x1849b85f3c693693e732dfc4577217acc18295193bede09ce8b97ad910310972",
+        "0x2a775ea761d20435b31fa2c33ff07663e24542ffb9e7b293dfce3042eb104686",
+        "0xf320b0703439a8114f81593de99cd0b8f3b9bf854601abb5b2ea0e8a3dda4a7",
+        "0xd07f6e7a8a0e9199d6d92801fff867002ff5b4808962f9da2ba5ce1bdd26a73",
+        "0x1c4954081e324939350febc2b918a293ebcdaead01be95ec02fcbe8d2c1635d1",
+        "0x197f2171ef99c2d053ee1fb5ff5ab288d56b9b41b4716c9214a4d97facc4c4a",
+        "0x2b9cdd484c5ba1e4d6efcc3f18734b5ac4c4a0b9102e2aeb48521a661d3feee9",
+        "0x14f44d672eb357739e42463497f9fdac46623af863eea4d947ca00a497dcdeb3",
+        "0x71d7627ae3b2eabda8a810227bf04206370ac78dbf6c372380182dbd3711fe3",
+        "0x2fdc08d9fe075ac58cb8c00f98697861a13b3ab6f9d41a4e768f75e477475bf5",
+        "0x20165fe405652104dceaeeca92950aa5adc571b8cafe192878cba58ff1be49c5",
+        "0x1c8c3ca0b3a3d75850fcd4dc7bf1e3445cd0cfff3ca510630fd90b47e8a24755",
+        "0x1f0c1a8fb16b0d2ac9a146d7ae20d8d179695a92a79ed66fc45d9da4532459b3",
+        "0x38146ec5a2573e1c30d2fb32c66c8440f426fbd108082df41c7bebd1d521c30",
+        "0x17d3d12b17fe762de4b835b2180b012e808816a7f2ff69ecb9d65188235d8fd4",
+        "0xe1a6b7d63a6e5a9e54e8f391dd4e9d49cdfedcbc87f02cd34d4641d2eb30491",
+        "0x9244eec34977ff795fc41036996ce974136377f521ac8eb9e04642d204783d2",
+        "0x1646d6f544ec36df9dc41f778a7ef1690a53c730b501471b6acd202194a7e8e9",
+        "0x64769603ba3f6c41f664d266ecb9a3a0f6567cd3e48b40f34d4894ee4c361b3",
+        "0x1595bb3cd19f84619dc2e368175a88d8627a7439eda9397202cdb1167531fd3f",
+        "0x2a529be462b81ca30265b558763b1498289c9d88277ab14f0838cb1fce4b472c",
+        "0xc08da612363088ad0bbc78abd233e8ace4c05a56fdabdd5e5e9b05e428bdaee",
+        "0x14748d0241710ef47f54b931ac5a58082b1d56b0f0c30d55fb71a6e8c9a6be14"
+      ]
+    },
+    "recipient": {
+      "address": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+      "ownerNullifierKey": "0xb0b",
+      "ownerNullifierKeyHash": "0xfebed96b79dc0d3a41b9c6929bda64b455f3c2ea1413da3f5789055d1c1f8ff",
+      "noteSecretSeed": "0x5eed2",
+      "noteSecretSeedHash": "0x223936dc38e9ec8e63c346c0afce59e4b1510e3fd3e56e4424f168620bef1ba8",
+      "registrationBlinder": "0xb11d2",
+      "policyCommitment": "0x1f8951d55137c9bb883a8584cdfe73395b0cc7221ba6b52d52b7dcc5e7879ade",
+      "policySlot": "0",
+      "policySetCommitment": "0x2dbb3bb9b0049b9c7db604620b089748f596f56aaefde18363e0ceea78dd5a0",
+      "leafPosition": "2",
+      "identityLeaf": "0x26e6064983c5df9181373d0f0c5719072796b4ecd618ab686d4965f1ceb3993e"
+    },
+    "identityRoot": "0x109493a37dcee1498fa8313b725f11e2f83a47cd4ef7420faabc16bd50ca09c3"
+  },
+  "noteTree": {
+    "root": "0x2f11c8775dc9823a8542b8a3ecea6a5c52b1ac6d55a27dca909dafa24a02aa1d",
+    "leaves": [
+      "0x166a92ee9866c843348b5904015abcd17b28671f42695cc07d936b297f383157",
+      "0x5e64e87c2ead9275a39e052667695db33354c0fa077d1d070b20faf6db19e29"
+    ]
+  },
+  "deposit": {
+    "ownerNullifierKeyHash": "0xfebed96b79dc0d3a41b9c6929bda64b455f3c2ea1413da3f5789055d1c1f8ff",
+    "noteSecret": "0x333",
+    "amount": "12345",
+    "tokenAddress": "0x0",
+    "leafIndex": "7",
+    "ownerCommitment": "0x2eca2a4c95f5d99131672a5aee944f0c93b156d23c3948a28bcaba5d8864658d",
+    "noteBodyCommitment": "0x2113049dfb2b4329be0c2e4bb0f2047e4758462afc2b930f274f36c01e814198",
+    "noteCommitment": "0x370b3afcbc1e338236c2a87b82bf81e4a3a271b6b94eb8c2b64729b9d8be2f1",
+    "outputNoteData": "0xaabb",
+    "outputNoteDataHash": "0x4e7a6e816dc9dbf7dc59e712a9a36cc6a158abb5dd81dac1d0dc98ae740087a",
+    "depositOperationDataHash": "0x11c8e1ff5b374badab85d322ee521ff5c80da1619bd05bffb78cf34af92ee825",
+    "policyOperationDigestDeposit": "0x1976356f2bd5b9498e3459854c01277d92cf6390cd4ad0c1832d871bfea64ee6"
+  },
+  "primitives": {
+    "ownerNullifierKeyHash": [
+      {
+        "in": [
+          "0xa11ce"
+        ],
+        "out": "0x12b828fa9f4d93bfcf0598082021988fba98861d279dc939fd8bb1f30fe2c724"
+      },
+      {
+        "in": [
+          "0xb0b"
+        ],
+        "out": "0xfebed96b79dc0d3a41b9c6929bda64b455f3c2ea1413da3f5789055d1c1f8ff"
+      }
+    ],
+    "noteSecretSeedHash": [
+      {
+        "in": [
+          "0x5eed"
+        ],
+        "out": "0x2af7923d7f3e67f4aaf13941d3a0329881f1337f9a194fbf7b3d360b57ee20b3"
+      }
+    ],
+    "identityLeaf": [
+      {
+        "in": [
+          "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+          "0x12b828fa9f4d93bfcf0598082021988fba98861d279dc939fd8bb1f30fe2c724",
+          "0x2af7923d7f3e67f4aaf13941d3a0329881f1337f9a194fbf7b3d360b57ee20b3",
+          "0x2427870fec880f919f41955f216ac7fe2eeefeea1a62fff4705ab08da5e37162"
+        ],
+        "out": "0x14d76db22d93f424cf75fdeb504b4b27ae68963f8ab87c8c0ac377972e2452fb"
+      }
+    ],
+    "policyCommitment": [
+      {
+        "in": [
+          "0x700000000000000000000000000000000000aa01",
+          "0x16dcb3399a8282cb4df1f87d8d005d0f88b6b81d00e1e2fdec57f2365683185",
+          "0xb11d"
+        ],
+        "out": "0xd89bff27c901fe1a54ce25acdde6befd8ab5e4afa7e4aac6ccb9a4fe93a6d22"
+      }
+    ],
+    "eip712AuthDataCommitment": [
+      {
+        "in": [
+          "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+        ],
+        "out": "0x16dcb3399a8282cb4df1f87d8d005d0f88b6b81d00e1e2fdec57f2365683185"
+      }
+    ],
+    "emptyRoots": {
+      "depth8": "0x67243231eddf4222f3911defbba7705aff06ed45960b27f6f91319196ef97e1",
+      "depth32": "0xb59baa35b9dc267744f0ccb4e3b0255c1fc512460d91130c6bc19fb2668568d"
+    },
+    "merkleNode": {
+      "in": [
+        "0x1",
+        "0x2"
+      ],
+      "out": "0x38682aa1cb5ae4e0a3f13da432a95c77c5c111f6f030faf9cad641ce1ed7383"
+    }
+  },
+  "scenarios": {
+    "transfer": {
+      "kind": "transfer",
+      "nonce": "0x99",
+      "blindingFactor": "0xb1",
+      "intentReplayId": "0x15979955b36cfc24a818874b8950f8d0d8dc556d419e1bdabd3ae0c81d9a1976",
+      "inputs": [
+        {
+          "amount": "600",
+          "noteSecret": "0x111",
+          "leafIndex": "0",
+          "ownerCommitment": "0x17874eede8af91df4c698ebc439a60e479bad17bab7dd9867cf2a324e2ca8d7c",
+          "noteBodyCommitment": "0x1d87aac589b2797f746a5fc0d50604f42bfc2bb650f7b6550266383221d52417",
+          "noteCommitment": "0x166a92ee9866c843348b5904015abcd17b28671f42695cc07d936b297f383157",
+          "nullifier": "0x2018000d8ff7248b4c82f9b6f199f800a9b4e70d1d5e07fcedb166831e9fd86",
+          "merkleSiblings": [
+            "0x5e64e87c2ead9275a39e052667695db33354c0fa077d1d070b20faf6db19e29",
+            "0xb63a53787021a4a962a452c2921b3663aff1ffd8d5510540f8e659e782956f1",
+            "0xe34ac2c09f45a503d2908bcb12f1cbae5fa4065759c88d501c097506a8b2290",
+            "0x21f9172d72fdcdafc312eee05cf5092980dda821da5b760a9fb8dbdf607c8a20",
+            "0x2373ea368857ec7af97e7b470d705848e2bf93ed7bef142a490f2119bcf82d8e",
+            "0x120157cfaaa49ce3da30f8b47879114977c24b266d58b0ac18b325d878aafddf",
+            "0x1c28fe1059ae0237b72334700697bdf465e03df03986fe05200cadeda66bd76",
+            "0x2d78ed82f93b61ba718b17c2dfe5b52375b4d37cbbed6f1fc98b47614b0cf21b",
+            "0x67243231eddf4222f3911defbba7705aff06ed45960b27f6f91319196ef97e1",
+            "0x1849b85f3c693693e732dfc4577217acc18295193bede09ce8b97ad910310972",
+            "0x2a775ea761d20435b31fa2c33ff07663e24542ffb9e7b293dfce3042eb104686",
+            "0xf320b0703439a8114f81593de99cd0b8f3b9bf854601abb5b2ea0e8a3dda4a7",
+            "0xd07f6e7a8a0e9199d6d92801fff867002ff5b4808962f9da2ba5ce1bdd26a73",
+            "0x1c4954081e324939350febc2b918a293ebcdaead01be95ec02fcbe8d2c1635d1",
+            "0x197f2171ef99c2d053ee1fb5ff5ab288d56b9b41b4716c9214a4d97facc4c4a",
+            "0x2b9cdd484c5ba1e4d6efcc3f18734b5ac4c4a0b9102e2aeb48521a661d3feee9",
+            "0x14f44d672eb357739e42463497f9fdac46623af863eea4d947ca00a497dcdeb3",
+            "0x71d7627ae3b2eabda8a810227bf04206370ac78dbf6c372380182dbd3711fe3",
+            "0x2fdc08d9fe075ac58cb8c00f98697861a13b3ab6f9d41a4e768f75e477475bf5",
+            "0x20165fe405652104dceaeeca92950aa5adc571b8cafe192878cba58ff1be49c5",
+            "0x1c8c3ca0b3a3d75850fcd4dc7bf1e3445cd0cfff3ca510630fd90b47e8a24755",
+            "0x1f0c1a8fb16b0d2ac9a146d7ae20d8d179695a92a79ed66fc45d9da4532459b3",
+            "0x38146ec5a2573e1c30d2fb32c66c8440f426fbd108082df41c7bebd1d521c30",
+            "0x17d3d12b17fe762de4b835b2180b012e808816a7f2ff69ecb9d65188235d8fd4",
+            "0xe1a6b7d63a6e5a9e54e8f391dd4e9d49cdfedcbc87f02cd34d4641d2eb30491",
+            "0x9244eec34977ff795fc41036996ce974136377f521ac8eb9e04642d204783d2",
+            "0x1646d6f544ec36df9dc41f778a7ef1690a53c730b501471b6acd202194a7e8e9",
+            "0x64769603ba3f6c41f664d266ecb9a3a0f6567cd3e48b40f34d4894ee4c361b3",
+            "0x1595bb3cd19f84619dc2e368175a88d8627a7439eda9397202cdb1167531fd3f",
+            "0x2a529be462b81ca30265b558763b1498289c9d88277ab14f0838cb1fce4b472c",
+            "0xc08da612363088ad0bbc78abd233e8ace4c05a56fdabdd5e5e9b05e428bdaee",
+            "0x14748d0241710ef47f54b931ac5a58082b1d56b0f0c30d55fb71a6e8c9a6be14"
+          ]
+        },
+        {
+          "amount": "400",
+          "noteSecret": "0x222",
+          "leafIndex": "1",
+          "ownerCommitment": "0x70d09afb3b52178e74d9724b5a4d72eadc6bef4bf93f2db9b6ab11d633f1ec1",
+          "noteBodyCommitment": "0x2e42440d652fb93b8781e983df9f97dcb8f3608d98ea64a655432ef237291c69",
+          "noteCommitment": "0x5e64e87c2ead9275a39e052667695db33354c0fa077d1d070b20faf6db19e29",
+          "nullifier": "0x10d7dc5dcade7c2b29c70fd1cd8104c759271b1696158b39100249d5fa51e9e5",
+          "merkleSiblings": [
+            "0x166a92ee9866c843348b5904015abcd17b28671f42695cc07d936b297f383157",
+            "0xb63a53787021a4a962a452c2921b3663aff1ffd8d5510540f8e659e782956f1",
+            "0xe34ac2c09f45a503d2908bcb12f1cbae5fa4065759c88d501c097506a8b2290",
+            "0x21f9172d72fdcdafc312eee05cf5092980dda821da5b760a9fb8dbdf607c8a20",
+            "0x2373ea368857ec7af97e7b470d705848e2bf93ed7bef142a490f2119bcf82d8e",
+            "0x120157cfaaa49ce3da30f8b47879114977c24b266d58b0ac18b325d878aafddf",
+            "0x1c28fe1059ae0237b72334700697bdf465e03df03986fe05200cadeda66bd76",
+            "0x2d78ed82f93b61ba718b17c2dfe5b52375b4d37cbbed6f1fc98b47614b0cf21b",
+            "0x67243231eddf4222f3911defbba7705aff06ed45960b27f6f91319196ef97e1",
+            "0x1849b85f3c693693e732dfc4577217acc18295193bede09ce8b97ad910310972",
+            "0x2a775ea761d20435b31fa2c33ff07663e24542ffb9e7b293dfce3042eb104686",
+            "0xf320b0703439a8114f81593de99cd0b8f3b9bf854601abb5b2ea0e8a3dda4a7",
+            "0xd07f6e7a8a0e9199d6d92801fff867002ff5b4808962f9da2ba5ce1bdd26a73",
+            "0x1c4954081e324939350febc2b918a293ebcdaead01be95ec02fcbe8d2c1635d1",
+            "0x197f2171ef99c2d053ee1fb5ff5ab288d56b9b41b4716c9214a4d97facc4c4a",
+            "0x2b9cdd484c5ba1e4d6efcc3f18734b5ac4c4a0b9102e2aeb48521a661d3feee9",
+            "0x14f44d672eb357739e42463497f9fdac46623af863eea4d947ca00a497dcdeb3",
+            "0x71d7627ae3b2eabda8a810227bf04206370ac78dbf6c372380182dbd3711fe3",
+            "0x2fdc08d9fe075ac58cb8c00f98697861a13b3ab6f9d41a4e768f75e477475bf5",
+            "0x20165fe405652104dceaeeca92950aa5adc571b8cafe192878cba58ff1be49c5",
+            "0x1c8c3ca0b3a3d75850fcd4dc7bf1e3445cd0cfff3ca510630fd90b47e8a24755",
+            "0x1f0c1a8fb16b0d2ac9a146d7ae20d8d179695a92a79ed66fc45d9da4532459b3",
+            "0x38146ec5a2573e1c30d2fb32c66c8440f426fbd108082df41c7bebd1d521c30",
+            "0x17d3d12b17fe762de4b835b2180b012e808816a7f2ff69ecb9d65188235d8fd4",
+            "0xe1a6b7d63a6e5a9e54e8f391dd4e9d49cdfedcbc87f02cd34d4641d2eb30491",
+            "0x9244eec34977ff795fc41036996ce974136377f521ac8eb9e04642d204783d2",
+            "0x1646d6f544ec36df9dc41f778a7ef1690a53c730b501471b6acd202194a7e8e9",
+            "0x64769603ba3f6c41f664d266ecb9a3a0f6567cd3e48b40f34d4894ee4c361b3",
+            "0x1595bb3cd19f84619dc2e368175a88d8627a7439eda9397202cdb1167531fd3f",
+            "0x2a529be462b81ca30265b558763b1498289c9d88277ab14f0838cb1fce4b472c",
+            "0xc08da612363088ad0bbc78abd233e8ace4c05a56fdabdd5e5e9b05e428bdaee",
+            "0x14748d0241710ef47f54b931ac5a58082b1d56b0f0c30d55fb71a6e8c9a6be14"
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "isDummy": false,
+          "ownerNullifierKeyHash": "0xfebed96b79dc0d3a41b9c6929bda64b455f3c2ea1413da3f5789055d1c1f8ff",
+          "amount": "700",
+          "tokenAddress": "0x0",
+          "noteSecret": "0x25590e65f2702d95ac996daf4491d63081dc409c0c73ab5b6698f137f4107613",
+          "ownerCommitment": "0x6356de03fa435dfd1c98bf322d0e9eb4797252565bfd5cc76165a0ea8c1588c",
+          "noteBodyCommitment": "0x1a5b2f99f9b0cbb7a56f984b5b621c882fb1bcd3de7f45e6d0aad3db73de53be",
+          "outputNoteData": "0xdead01",
+          "outputNoteDataHash": "0x1d8a6d8fbf5ad4a292372aefd83c79714a5e03eff2f420686f56a5a56fb0482d",
+          "outputBinding": "0x6cc51c3a42a7b493ecce0637e3652a4e6fefd57dca0b2a611e7a16a97ac979e"
+        },
+        {
+          "isDummy": false,
+          "ownerNullifierKeyHash": "0x12b828fa9f4d93bfcf0598082021988fba98861d279dc939fd8bb1f30fe2c724",
+          "amount": "300",
+          "tokenAddress": "0x0",
+          "noteSecret": "0x13c845001072699afc13f51af03982717e332d8ebbc25be34904ad5eec306b5e",
+          "ownerCommitment": "0x2f4ebbdbbb14badfd111b7fa258e990f64fed3360a4c4c591862d40a636d7a79",
+          "noteBodyCommitment": "0x11909085b92faebce15183e302c32fbdbaaa50bf325fa134e5513232654e8d16",
+          "outputNoteData": "0xdead02",
+          "outputNoteDataHash": "0xc2f6d132fccaa0db6747841fdc8bd14a1ce1ee7705f6d6dd8297918c497d2c8",
+          "outputBinding": "0x14402fbdf946cb15c3e86d1e6f115f8710c33d3023b367075b6ebbbd0798554e"
+        },
+        {
+          "isDummy": true,
+          "ownerNullifierKeyHash": "0x559c804a340eccb91c044add95fb6a4f9d4438b52010df25f8aa1e1ffa052",
+          "amount": "0",
+          "tokenAddress": "0x0",
+          "noteSecret": "0x5eb58c1d1b6f4e32a584e3c6309699fd3c27f781c3d505cf923664cc669dd3e",
+          "ownerCommitment": "0x235c0b68287f26b446c4b96d0ee7216801b40535df15399aa4d1cfbd4ce34d97",
+          "noteBodyCommitment": "0x35526dd1875c25219550252b594ba077cc14e815d443983652159aed3ea94b2",
+          "outputNoteData": "0x",
+          "outputNoteDataHash": "0x4410c360230a295b13d66d8d6c1a24c44311531e39c64f66c7301b49d85a46c",
+          "outputBinding": "0x2659cea2d1a83504f237aa5de51084de5ad7c7098be373b08a21bbe05d88184f"
+        }
+      ],
+      "intentFields": {
+        "poolAddress": "0x700000000000000000000000000000000000a001",
+        "authVerifier": "0x700000000000000000000000000000000000aa01",
+        "authorizingAddress": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+        "operationKind": "0x0",
+        "tokenAddress": "0x0",
+        "recipientOwnerNullifierKeyHash": "0xfebed96b79dc0d3a41b9c6929bda64b455f3c2ea1413da3f5789055d1c1f8ff",
+        "amount": "0x2bc",
+        "feeNoteRecipientOwnerNullifierKeyHash": "0x0",
+        "feeAmount": "0x0",
+        "publicRecipientAddress": "0x0",
+        "authorizedSubmitter": "0x0",
+        "downstreamActionCommitment": "0x0",
+        "executionConstraintsFlags": "0x0",
+        "lockedOutputBinding0": "0x0",
+        "lockedOutputBinding1": "0x0",
+        "lockedOutputBinding2": "0x0",
+        "nonce": "0x99",
+        "validUntilSeconds": "0xee6b2800",
+        "executionChainId": "0x7a69"
+      },
+      "policyDataHash": "0x4410c360230a295b13d66d8d6c1a24c44311531e39c64f66c7301b49d85a46c",
+      "transactIntentFieldsHash": "0x1d8ca2b2ed7dafbc7155148df5e088ecfe9f6930f7e06c39a71bb2fd3e3a3921",
+      "transactionIntentDigest": "0x9783dd5db248d0223ed86b48b46c3c52a146e71f63e8b119c2abfa99b2a4d07",
+      "blindedAuthCommitment": "0xfd69c1d6bf229a0f9c1c5969d074249117844472a11d36f9fab85c9f9d8972b",
+      "authDataCommitment": "0x16dcb3399a8282cb4df1f87d8d005d0f88b6b81d00e1e2fdec57f2365683185",
+      "eip712": {
+        "domain": {
+          "name": "ERCXXXXPrivateTransfers",
+          "version": "1",
+          "chainId": 31337,
+          "verifyingContract": "0x700000000000000000000000000000000000a001"
+        },
+        "digest": "0x7ebf17e7cd99b1806db48ee15655968ef3dec921ccdea3ed79fe0c88279b8de1",
+        "signature": "0x4f0512a78804ca391d10fbedb269bf8a18a18c82b5cb411210698512893f77aa4544ab524025512f7f1d4b64bb7afcf7cbd3ced022d049f1621ef1dcb49173631b",
+        "r": "0x4f0512a78804ca391d10fbedb269bf8a18a18c82b5cb411210698512893f77aa",
+        "s": "0x4544ab524025512f7f1d4b64bb7afcf7cbd3ced022d049f1621ef1dcb4917363",
+        "v": 27,
+        "publicKeyX": "0x8318535b54105d4a7aae60c08fc45f9687181b4fdfc625bd1a753fa7397fed75",
+        "publicKeyY": "0x3547f11ca8696646f2f3acb08e31016afac23e630c5d11f59f61fef57b0d2aa5"
+      },
+      "publicInputs": [
+        "0x2f11c8775dc9823a8542b8a3ecea6a5c52b1ac6d55a27dca909dafa24a02aa1d",
+        "0x2018000d8ff7248b4c82f9b6f199f800a9b4e70d1d5e07fcedb166831e9fd86",
+        "0x10d7dc5dcade7c2b29c70fd1cd8104c759271b1696158b39100249d5fa51e9e5",
+        "0x1a5b2f99f9b0cbb7a56f984b5b621c882fb1bcd3de7f45e6d0aad3db73de53be",
+        "0x11909085b92faebce15183e302c32fbdbaaa50bf325fa134e5513232654e8d16",
+        "0x35526dd1875c25219550252b594ba077cc14e815d443983652159aed3ea94b2",
+        "0x0",
+        "0x0",
+        "0x0",
+        "0x15979955b36cfc24a818874b8950f8d0d8dc556d419e1bdabd3ae0c81d9a1976",
+        "0xee6b2800",
+        "0x7a69",
+        "0x700000000000000000000000000000000000a001",
+        "0x109493a37dcee1498fa8313b725f11e2f83a47cd4ef7420faabc16bd50ca09c3",
+        "0x1d8a6d8fbf5ad4a292372aefd83c79714a5e03eff2f420686f56a5a56fb0482d",
+        "0xc2f6d132fccaa0db6747841fdc8bd14a1ce1ee7705f6d6dd8297918c497d2c8",
+        "0x4410c360230a295b13d66d8d6c1a24c44311531e39c64f66c7301b49d85a46c",
+        "0x700000000000000000000000000000000000aa01",
+        "0xfd69c1d6bf229a0f9c1c5969d074249117844472a11d36f9fab85c9f9d8972b",
+        "0x9783dd5db248d0223ed86b48b46c3c52a146e71f63e8b119c2abfa99b2a4d07",
+        "0x0",
+        "0x4410c360230a295b13d66d8d6c1a24c44311531e39c64f66c7301b49d85a46c",
+        "0x0",
+        "0x0"
+      ],
+      "transactPublicTransitionHash": "0x7fdae9e10475d7e8216b0bdb937b6022c25d24b6f06b82f74b124252f516717",
+      "transactOperationDataHash": "0x2f19d8d7cb3753b1f735e14243897838b201723ad7af5682fa800cb6e221160b"
+    },
+    "withdrawal": {
+      "kind": "withdrawal",
+      "nonce": "0x9a",
+      "blindingFactor": "0xb2",
+      "intentReplayId": "0x178fac4f5a3d1d733bb5186cee233daee264d68dc0672b5c34da7ee328a694e6",
+      "phantomNullifier": "0x144d252e6e165db89fb3e674b51b0eec6994294f92e0a3a8c5243655e6010832",
+      "inputs": [
+        {
+          "amount": "600",
+          "noteSecret": "0x111",
+          "leafIndex": "0",
+          "ownerCommitment": "0x17874eede8af91df4c698ebc439a60e479bad17bab7dd9867cf2a324e2ca8d7c",
+          "noteBodyCommitment": "0x1d87aac589b2797f746a5fc0d50604f42bfc2bb650f7b6550266383221d52417",
+          "noteCommitment": "0x166a92ee9866c843348b5904015abcd17b28671f42695cc07d936b297f383157",
+          "nullifier": "0x2018000d8ff7248b4c82f9b6f199f800a9b4e70d1d5e07fcedb166831e9fd86",
+          "merkleSiblings": [
+            "0x5e64e87c2ead9275a39e052667695db33354c0fa077d1d070b20faf6db19e29",
+            "0xb63a53787021a4a962a452c2921b3663aff1ffd8d5510540f8e659e782956f1",
+            "0xe34ac2c09f45a503d2908bcb12f1cbae5fa4065759c88d501c097506a8b2290",
+            "0x21f9172d72fdcdafc312eee05cf5092980dda821da5b760a9fb8dbdf607c8a20",
+            "0x2373ea368857ec7af97e7b470d705848e2bf93ed7bef142a490f2119bcf82d8e",
+            "0x120157cfaaa49ce3da30f8b47879114977c24b266d58b0ac18b325d878aafddf",
+            "0x1c28fe1059ae0237b72334700697bdf465e03df03986fe05200cadeda66bd76",
+            "0x2d78ed82f93b61ba718b17c2dfe5b52375b4d37cbbed6f1fc98b47614b0cf21b",
+            "0x67243231eddf4222f3911defbba7705aff06ed45960b27f6f91319196ef97e1",
+            "0x1849b85f3c693693e732dfc4577217acc18295193bede09ce8b97ad910310972",
+            "0x2a775ea761d20435b31fa2c33ff07663e24542ffb9e7b293dfce3042eb104686",
+            "0xf320b0703439a8114f81593de99cd0b8f3b9bf854601abb5b2ea0e8a3dda4a7",
+            "0xd07f6e7a8a0e9199d6d92801fff867002ff5b4808962f9da2ba5ce1bdd26a73",
+            "0x1c4954081e324939350febc2b918a293ebcdaead01be95ec02fcbe8d2c1635d1",
+            "0x197f2171ef99c2d053ee1fb5ff5ab288d56b9b41b4716c9214a4d97facc4c4a",
+            "0x2b9cdd484c5ba1e4d6efcc3f18734b5ac4c4a0b9102e2aeb48521a661d3feee9",
+            "0x14f44d672eb357739e42463497f9fdac46623af863eea4d947ca00a497dcdeb3",
+            "0x71d7627ae3b2eabda8a810227bf04206370ac78dbf6c372380182dbd3711fe3",
+            "0x2fdc08d9fe075ac58cb8c00f98697861a13b3ab6f9d41a4e768f75e477475bf5",
+            "0x20165fe405652104dceaeeca92950aa5adc571b8cafe192878cba58ff1be49c5",
+            "0x1c8c3ca0b3a3d75850fcd4dc7bf1e3445cd0cfff3ca510630fd90b47e8a24755",
+            "0x1f0c1a8fb16b0d2ac9a146d7ae20d8d179695a92a79ed66fc45d9da4532459b3",
+            "0x38146ec5a2573e1c30d2fb32c66c8440f426fbd108082df41c7bebd1d521c30",
+            "0x17d3d12b17fe762de4b835b2180b012e808816a7f2ff69ecb9d65188235d8fd4",
+            "0xe1a6b7d63a6e5a9e54e8f391dd4e9d49cdfedcbc87f02cd34d4641d2eb30491",
+            "0x9244eec34977ff795fc41036996ce974136377f521ac8eb9e04642d204783d2",
+            "0x1646d6f544ec36df9dc41f778a7ef1690a53c730b501471b6acd202194a7e8e9",
+            "0x64769603ba3f6c41f664d266ecb9a3a0f6567cd3e48b40f34d4894ee4c361b3",
+            "0x1595bb3cd19f84619dc2e368175a88d8627a7439eda9397202cdb1167531fd3f",
+            "0x2a529be462b81ca30265b558763b1498289c9d88277ab14f0838cb1fce4b472c",
+            "0xc08da612363088ad0bbc78abd233e8ace4c05a56fdabdd5e5e9b05e428bdaee",
+            "0x14748d0241710ef47f54b931ac5a58082b1d56b0f0c30d55fb71a6e8c9a6be14"
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "isDummy": false,
+          "ownerNullifierKeyHash": "0x12b828fa9f4d93bfcf0598082021988fba98861d279dc939fd8bb1f30fe2c724",
+          "amount": "350",
+          "tokenAddress": "0x0",
+          "noteSecret": "0x270d5b72c89993b50014209ff9ddf6cec5c62ad706bf71bd41de0d6a456b9a",
+          "ownerCommitment": "0x2a2c8fc5eae184acf6cd275e325800dc5c6b13b57b8a71b6a10145289a15f50e",
+          "noteBodyCommitment": "0x93ef22566489b7b6a4015669fbc446bab61c845526cf22a3f88f20a1b38ba95",
+          "outputNoteData": "0xdead03",
+          "outputNoteDataHash": "0x2f1868faa87ab059d2321213e6ca32d7f011b426b9455532fcf8bc6e6d1188e5",
+          "outputBinding": "0x2edfa84888505c3cb58c391ea3a7e92692fbeb0a8351431e24a7a76670cc5720"
+        },
+        {
+          "isDummy": true,
+          "ownerNullifierKeyHash": "0x559c804a340eccb91c044add95fb6a4f9d4438b52010df25f8aa1e1ffa052",
+          "amount": "0",
+          "tokenAddress": "0x0",
+          "noteSecret": "0x9788f4c35724bbb3d981c299ec5a89245c70872d0b35dbf09f91ae140bde70f",
+          "ownerCommitment": "0x303552b673179eef290c7e8d158a4320005c2ed7b9e674652eac5175afc84118",
+          "noteBodyCommitment": "0x1af841fb991335d3957cf400cf5fcc004bcb3ccd7a5403751bbf29e30697e50c",
+          "outputNoteData": "0x",
+          "outputNoteDataHash": "0x4410c360230a295b13d66d8d6c1a24c44311531e39c64f66c7301b49d85a46c",
+          "outputBinding": "0xaaf8b0220bd5244f81d0baeb59cda445ffb75419ea78a59c53f582029fff4ca"
+        },
+        {
+          "isDummy": true,
+          "ownerNullifierKeyHash": "0x559c804a340eccb91c044add95fb6a4f9d4438b52010df25f8aa1e1ffa052",
+          "amount": "0",
+          "tokenAddress": "0x0",
+          "noteSecret": "0x22ea57fd11504925d6719fb942c506a2f463825a32f370374d09a2073840272d",
+          "ownerCommitment": "0x1e7bbb5bba396ceb44c520421780ce068fe829c76dbd1505bed35ec31eb43a11",
+          "noteBodyCommitment": "0x267b3dfc0a156fddadbbde8f7dcadca09168f390b1f1885f26c56beb78ab1212",
+          "outputNoteData": "0x",
+          "outputNoteDataHash": "0x4410c360230a295b13d66d8d6c1a24c44311531e39c64f66c7301b49d85a46c",
+          "outputBinding": "0x8d87bf2344fa3e5e0cb621c5760d4c980789a12bc011d66527ce8fd71a1c620"
+        }
+      ],
+      "intentFields": {
+        "poolAddress": "0x700000000000000000000000000000000000a001",
+        "authVerifier": "0x700000000000000000000000000000000000aa01",
+        "authorizingAddress": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+        "operationKind": "0x1",
+        "tokenAddress": "0x0",
+        "recipientOwnerNullifierKeyHash": "0x0",
+        "amount": "0xfa",
+        "feeNoteRecipientOwnerNullifierKeyHash": "0x0",
+        "feeAmount": "0x0",
+        "publicRecipientAddress": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc",
+        "authorizedSubmitter": "0x700000000000000000000000000000000000dd01",
+        "downstreamActionCommitment": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        "executionConstraintsFlags": "0x0",
+        "lockedOutputBinding0": "0x0",
+        "lockedOutputBinding1": "0x0",
+        "lockedOutputBinding2": "0x0",
+        "nonce": "0x9a",
+        "validUntilSeconds": "0xee6b2800",
+        "executionChainId": "0x7a69"
+      },
+      "policyDataHash": "0x4410c360230a295b13d66d8d6c1a24c44311531e39c64f66c7301b49d85a46c",
+      "transactIntentFieldsHash": "0x2c3c9827d86c4622a83230469964845556cae614974bfa479e5e3b600de915a1",
+      "transactionIntentDigest": "0x822d3e8671ccdb73fca24fc41b8c25a5bffb70a67a42bf312d3fa354ee48403",
+      "blindedAuthCommitment": "0x288294e5825e5e701edc0b3ceca979622e87cb4f1a2f2c74682b1469829558ab",
+      "authDataCommitment": "0x16dcb3399a8282cb4df1f87d8d005d0f88b6b81d00e1e2fdec57f2365683185",
+      "eip712": {
+        "domain": {
+          "name": "ERCXXXXPrivateTransfers",
+          "version": "1",
+          "chainId": 31337,
+          "verifyingContract": "0x700000000000000000000000000000000000a001"
+        },
+        "digest": "0x06d831e3514d82664a76e5298ee48939d2a0511fa118bd0593b821c121cfb509",
+        "signature": "0xea5a7acf97b8902243b57eafbd9734818addcff1a31acdc78d51e7145e1f7db174624ddd4c961063267a779c4df11b7f71c8c9f13e138899fea447592226f1081c",
+        "r": "0xea5a7acf97b8902243b57eafbd9734818addcff1a31acdc78d51e7145e1f7db1",
+        "s": "0x74624ddd4c961063267a779c4df11b7f71c8c9f13e138899fea447592226f108",
+        "v": 28,
+        "publicKeyX": "0x8318535b54105d4a7aae60c08fc45f9687181b4fdfc625bd1a753fa7397fed75",
+        "publicKeyY": "0x3547f11ca8696646f2f3acb08e31016afac23e630c5d11f59f61fef57b0d2aa5"
+      },
+      "publicInputs": [
+        "0x2f11c8775dc9823a8542b8a3ecea6a5c52b1ac6d55a27dca909dafa24a02aa1d",
+        "0x2018000d8ff7248b4c82f9b6f199f800a9b4e70d1d5e07fcedb166831e9fd86",
+        "0x144d252e6e165db89fb3e674b51b0eec6994294f92e0a3a8c5243655e6010832",
+        "0x93ef22566489b7b6a4015669fbc446bab61c845526cf22a3f88f20a1b38ba95",
+        "0x1af841fb991335d3957cf400cf5fcc004bcb3ccd7a5403751bbf29e30697e50c",
+        "0x267b3dfc0a156fddadbbde8f7dcadca09168f390b1f1885f26c56beb78ab1212",
+        "0xfa",
+        "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc",
+        "0x0",
+        "0x178fac4f5a3d1d733bb5186cee233daee264d68dc0672b5c34da7ee328a694e6",
+        "0xee6b2800",
+        "0x7a69",
+        "0x700000000000000000000000000000000000a001",
+        "0x109493a37dcee1498fa8313b725f11e2f83a47cd4ef7420faabc16bd50ca09c3",
+        "0x2f1868faa87ab059d2321213e6ca32d7f011b426b9455532fcf8bc6e6d1188e5",
+        "0x4410c360230a295b13d66d8d6c1a24c44311531e39c64f66c7301b49d85a46c",
+        "0x4410c360230a295b13d66d8d6c1a24c44311531e39c64f66c7301b49d85a46c",
+        "0x700000000000000000000000000000000000aa01",
+        "0x288294e5825e5e701edc0b3ceca979622e87cb4f1a2f2c74682b1469829558ab",
+        "0x822d3e8671ccdb73fca24fc41b8c25a5bffb70a67a42bf312d3fa354ee48403",
+        "0x0",
+        "0x4410c360230a295b13d66d8d6c1a24c44311531e39c64f66c7301b49d85a46c",
+        "0x700000000000000000000000000000000000dd01",
+        "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+      ],
+      "transactPublicTransitionHash": "0x123e6507bc50e672e8cdac479ff5b329eb17a1dfc17334344584333a04e62b98",
+      "transactOperationDataHash": "0x1a5df21a4da148b60df38d3097b38744f73003b67a29030a354adccdf3113c38",
+      "policyOperationDigest": "0x27a7b69845c423562cd7846b44e566a6a72399d900afb3c8503d796591c7ec39"
+    }
+  }
+}

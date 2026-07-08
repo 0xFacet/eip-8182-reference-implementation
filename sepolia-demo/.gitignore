@@ -7,3 +7,4 @@ broadcast/
 .env
 .env.*
 app/public/prover/
+docs/

@@ -1,0 +1,59 @@
+{
+  "name": "@erc-app-layer-private-transfers/reference",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reference implementation of the app-layer private transfers ERC: singletons, pools, circuits, SDK, and demo app.",
+  "license": "CC0-1.0",
+  "scripts": {
+    "gen:constants": "node scripts/gen_constants.js",
+    "gen:vectors": "tsx scripts/gen_vectors.ts",
+    "gen:envelope-vectors": "node scripts/gen_envelope_vectors.js",
+    "build:pool": "bash scripts/build_pool.sh",
+    "build:auth-demo": "bash scripts/build_auth_demo.sh",
+    "build:auth-honk": "bash scripts/build_auth_honk.sh",
+    "build:fixtures": "node scripts/gen_pool_fixtures.js",
+    "test:sdk": "vitest run",
+    "test:contracts": "forge test --root contracts",
+    "test:negative": "node scripts/negative_test.js",
+    "e2e": "node scripts/e2e.mjs",
+    "prepare:prover": "node scripts/prepare_prover_assets.mjs",
+    "gen:spec": "node scripts/gen_spec_page.mjs",
+    "dev:app": "npm run prepare:prover && npm run gen:spec && vite --config app/vite.config.ts",
+    "build:app": "npm run prepare:prover && npm run gen:spec && vite --config app/vite.config.ts build",
+    "preview:app": "vite --config app/vite.config.ts preview",
+    "typecheck:app": "tsc -p app/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.0.1",
+    "@noble/post-quantum": "^0.6.1",
+    "snarkjs": "^0.7.6",
+    "viem": "^2.53.1"
+  },
+  "devDependencies": {
+    "@aztec/bb.js": "4.0.0-nightly.20260120",
+    "@noir-lang/acvm_js": "1.0.0-beta.19",
+    "@noir-lang/noir_js": "1.0.0-beta.19",
+    "@noir-lang/noirc_abi": "1.0.0-beta.19",
+    "@rainbow-me/rainbowkit": "^2.2.11",
+    "@tanstack/react-query": "^5.101.1",
+    "@types/node": "^20.19.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "framer-motion": "^12.0.0",
+    "marked": "^18.0.5",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tsx": "^4.23.0",
+    "typescript": "^5.8.3",
+    "vite": "^7.3.5",
+    "vite-plugin-node-polyfills": "^0.28.0",
+    "vitest": "^4.1.9",
+    "wagmi": "^2.19.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
